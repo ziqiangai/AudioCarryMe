@@ -21,7 +21,7 @@ class SqliteChatStorage implements ChatStorage {
     final path = p.join(await getDatabasesPath(), 'carry_me.db');
     final db = await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -89,6 +89,13 @@ class SqliteChatStorage implements ChatStorage {
         if (oldVersion < 9) {
           await db.execute(
               "ALTER TABLE generation_tasks ADD COLUMN local_paths TEXT NOT NULL DEFAULT '[]'");
+        }
+        // v9 → v10：批量场景标签 + 血缘父任务。
+        if (oldVersion < 10) {
+          await db.execute(
+              'ALTER TABLE generation_tasks ADD COLUMN label TEXT');
+          await db.execute(
+              'ALTER TABLE generation_tasks ADD COLUMN parent_task_id TEXT');
         }
       },
     );
@@ -284,6 +291,8 @@ class SqliteChatStorage implements ChatStorage {
         ppio_task_id    TEXT,
         trace_id        TEXT,
         local_paths     TEXT    NOT NULL DEFAULT '[]',
+        label           TEXT,
+        parent_task_id  TEXT,
         result_urls     TEXT    NOT NULL,
         error           TEXT,
         created_at      INTEGER NOT NULL,
@@ -310,6 +319,8 @@ class SqliteChatStorage implements ChatStorage {
               traceId: r['trace_id'] as String?,
               localPaths: GenerationTask.decodeUrls(
                   (r['local_paths'] as String?) ?? '[]'),
+              label: r['label'] as String?,
+              parentTaskId: r['parent_task_id'] as String?,
               resultUrls: GenerationTask.decodeUrls(r['result_urls'] as String),
               error: r['error'] as String?,
               createdAt:
@@ -335,6 +346,8 @@ class SqliteChatStorage implements ChatStorage {
         'ppio_task_id': task.ppioTaskId,
       'trace_id': task.traceId,
       'local_paths': task.localPathsJson,
+      'label': task.label,
+      'parent_task_id': task.parentTaskId,
         'result_urls': task.resultUrlsJson,
         'error': task.error,
         'created_at': task.createdAt.millisecondsSinceEpoch,

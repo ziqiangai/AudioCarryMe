@@ -162,7 +162,9 @@ class _SkeletonViewState extends State<_SkeletonView>
                   style: const TextStyle(
                       fontSize: 12, color: Color(0xFF666666))),
               const Spacer(),
-              Text(model?.name ?? widget.task.modelId,
+              Text(
+                  '${widget.task.label != null ? '${widget.task.label} · ' : ''}'
+                  '${model?.name ?? widget.task.modelId}',
                   style: const TextStyle(
                       fontSize: 11, color: WeColors.subtitle)),
             ],
@@ -217,7 +219,8 @@ class _ResultView extends StatelessWidget {
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  model?.name ?? task.modelId,
+                  '${task.label != null ? '${task.label} · ' : ''}'
+                  '${model?.name ?? task.modelId}',
                   style:
                       const TextStyle(fontSize: 11, color: WeColors.subtitle),
                   overflow: TextOverflow.ellipsis,

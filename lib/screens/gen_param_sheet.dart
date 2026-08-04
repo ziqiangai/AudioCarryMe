@@ -26,6 +26,8 @@ Future<GenSheetResult?> showGenParamSheet(
   String? initialModelId,
   Map<String, String>? initialParams,
   String? refImageUrl,
+  int batchCount = 1,
+  bool batchRef = false,
 }) {
   return showModalBottomSheet<GenSheetResult>(
     context: context,
@@ -37,6 +39,8 @@ Future<GenSheetResult?> showGenParamSheet(
       initialModelId: initialModelId,
       initialParams: initialParams,
       refImageUrl: refImageUrl,
+      batchCount: batchCount,
+      batchRef: batchRef,
     ),
   );
 }
@@ -47,12 +51,16 @@ class _GenParamSheet extends StatefulWidget {
   final String? initialModelId;
   final Map<String, String>? initialParams;
   final String? refImageUrl;
+  final int batchCount;
+  final bool batchRef;
   const _GenParamSheet({
     required this.kind,
     required this.prompt,
     this.initialModelId,
     this.initialParams,
     this.refImageUrl,
+    this.batchCount = 1,
+    this.batchRef = false,
   });
 
   @override
@@ -65,7 +73,8 @@ class _GenParamSheetState extends State<_GenParamSheet> {
   late final TextEditingController _promptCtl;
   late final TextEditingController _negativeCtl;
 
-  bool get _hasRef => widget.refImageUrl != null;
+  bool get _hasRef => widget.refImageUrl != null || widget.batchRef;
+  bool get _isBatch => widget.batchCount > 1;
 
   @override
   void initState() {
@@ -160,7 +169,9 @@ class _GenParamSheetState extends State<_GenParamSheet> {
                   Icon(isImage ? Icons.image_outlined : Icons.movie_outlined,
                       size: 22, color: const Color(0xFF2E7CF6)),
                   const SizedBox(width: 8),
-                  Text(isImage ? '生成图片' : '生成视频',
+                  Text(
+                      '${isImage ? '生成图片' : '生成视频'}'
+                      '${_isBatch ? ' ×${widget.batchCount}' : ''}',
                       style: const TextStyle(
                           fontSize: 17, fontWeight: FontWeight.w600)),
                 ],
@@ -210,18 +221,43 @@ class _GenParamSheetState extends State<_GenParamSheet> {
                     const SizedBox(height: 14),
                   ],
                   _sectionLabel('提示词'),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: _cardDeco,
-                    child: TextField(
-                      controller: _promptCtl,
-                      minLines: 2,
-                      maxLines: 4,
-                      style: const TextStyle(fontSize: 14, height: 1.5),
-                      decoration: const InputDecoration(
-                          border: InputBorder.none, isCollapsed: false),
+                  if (_isBatch)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: _cardDeco,
+                      child: Row(children: [
+                        const Icon(Icons.layers_outlined,
+                            size: 18, color: Color(0xFF2E7CF6)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            widget.batchRef
+                                ? '将对 ${widget.batchCount} 张参考图分别生成，'
+                                    '提示词沿用各自来源'
+                                : '将分别使用 ${widget.batchCount} 条提示词生成，'
+                                    '以下参数应用到全部',
+                            style: const TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFF555555),
+                                height: 1.4),
+                          ),
+                        ),
+                      ]),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      decoration: _cardDeco,
+                      child: TextField(
+                        controller: _promptCtl,
+                        minLines: 2,
+                        maxLines: 4,
+                        style: const TextStyle(fontSize: 14, height: 1.5),
+                        decoration: const InputDecoration(
+                            border: InputBorder.none, isCollapsed: false),
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 14),
                   _sectionLabel('模型'),
                   SizedBox(

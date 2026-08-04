@@ -37,6 +37,12 @@ class GenerationTask {
   /// PPIO/Novita 响应头 x-trace-id，反馈问题给供应商时用。
   String? traceId;
 
+  /// 场景标签（批量生成时如「场景 1」），用于聊天里串联同一条创作链。
+  final String? label;
+
+  /// 血缘：图生视频时指向来源图片任务 id。
+  final String? parentTaskId;
+
   /// 生成结果 URL 列表（图片或视频）。会过期，仅作下载源与兜底。
   List<String> resultUrls;
 
@@ -57,6 +63,8 @@ class GenerationTask {
     this.status = GenTaskStatus.draft,
     this.ppioTaskId,
     this.traceId,
+    this.label,
+    this.parentTaskId,
     List<String>? resultUrls,
     List<String>? localPaths,
     this.error,
@@ -92,5 +100,7 @@ class GenerationTask {
         modelId: modelId,
         prompt: prompt,
         params: Map.of(params),
+        label: label,
+        parentTaskId: parentTaskId,
       );
 }

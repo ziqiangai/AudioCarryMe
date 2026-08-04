@@ -27,23 +27,34 @@ const List<Map<String, dynamic>> kCreationTools = [
   {
     'name': 'generate_image',
     'description': '生成图片。prompt 必须忠实于用户给定的文案：'
-        '用户引用了提示词卡片就原文使用，否则用用户的原始描述，不要自行扩写添加想象内容。',
+        '用户引用了提示词卡片就原文使用，否则用用户的原始描述，不要自行扩写添加想象内容。'
+        '批量时一轮内多次调用本工具，每次配 label（如「场景1」）标记所属场景。',
     'input_schema': {
       'type': 'object',
       'properties': {
         'prompt': {'type': 'string', 'description': '用户给定的画面文案（忠实原文）'},
+        'label': {
+          'type': 'string',
+          'description': '场景标签（如 场景1），用于把提示词/图片/视频串成一条创作链'
+        },
       },
       'required': ['prompt'],
     },
   },
   {
     'name': 'generate_video',
-    'description': '生成视频。prompt 必须忠实于用户给定的文案：'
-        '用户引用了提示词卡片就原文使用，否则用用户的原始描述，不要自行扩写添加想象内容。',
+    'description': '生成视频。prompt 必须忠实于用户给定的文案。'
+        '要以某个场景已生成的图片为首帧（图生视频）时，传 ref_label=该场景的 label，'
+        'App 会自动找到对应图片，无需 URL。批量时一轮内多次调用。',
     'input_schema': {
       'type': 'object',
       'properties': {
         'prompt': {'type': 'string', 'description': '用户给定的视频文案（忠实原文）'},
+        'label': {'type': 'string', 'description': '场景标签（如 场景1）'},
+        'ref_label': {
+          'type': 'string',
+          'description': '以哪个场景的已生成图片作为首帧（填该场景的 label）'
+        },
       },
       'required': ['prompt'],
     },

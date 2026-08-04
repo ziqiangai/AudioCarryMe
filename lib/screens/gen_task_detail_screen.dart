@@ -152,6 +152,7 @@ class _StatusCard extends StatelessWidget {
                   fontSize: 15, fontWeight: FontWeight.w600, color: color)),
           const SizedBox(height: 2),
           Text(
+            '${task.label != null ? '${task.label} · ' : ''}'
             '${task.kind == GenKind.image ? '图片' : '视频'} · ${model?.name ?? task.modelId}',
             style: const TextStyle(fontSize: 12, color: WeColors.subtitle),
           ),
@@ -371,6 +372,8 @@ class _TimelineCard extends StatelessWidget {
               ? '${elapsed.inSeconds} 秒'
               : '${elapsed.inMinutes} 分 ${elapsed.inSeconds % 60} 秒',
           false),
+      if (task.parentTaskId != null)
+        ('来源图任务', task.parentTaskId!, true),
       ('PPIO 任务', task.ppioTaskId ?? '—（本版本前的任务未记录）',
           task.ppioTaskId != null),
       ('Trace ID', task.traceId ?? '—（本版本前的任务未记录）',

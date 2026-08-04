@@ -38,6 +38,21 @@ class GenerationStore extends ChangeNotifier {
 
   GenerationTask? byId(String id) => _tasks[id];
 
+  /// 按场景标签找会话内最新的成功图片任务（agent 用 ref_label 引用首帧）。
+  GenerationTask? findImageByLabel(String conversationId, String label) {
+    GenerationTask? best;
+    for (final t in _tasks.values) {
+      if (t.conversationId == conversationId &&
+          t.kind == GenKind.image &&
+          t.label == label &&
+          t.status == GenTaskStatus.succeeded &&
+          t.resultUrls.isNotEmpty) {
+        if (best == null || t.createdAt.isAfter(best.createdAt)) best = t;
+      }
+    }
+    return best;
+  }
+
   /// 全部任务，最新发起的在最前。
   List<GenerationTask> get all {
     final list = _tasks.values.toList();
@@ -89,6 +104,8 @@ class GenerationStore extends ChangeNotifier {
     required String prompt,
     required Map<String, String> params,
     String? id,
+    String? label,
+    String? parentTaskId,
   }) async {
     final task = GenerationTask(
       id: id ?? newTaskId(),
@@ -98,6 +115,8 @@ class GenerationStore extends ChangeNotifier {
       prompt: prompt,
       params: params,
       status: GenTaskStatus.submitting,
+      label: label,
+      parentTaskId: parentTaskId,
     );
     _tasks[task.id] = task;
     await _storage.upsertGenerationTask(task);

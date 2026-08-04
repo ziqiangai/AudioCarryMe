@@ -116,33 +116,97 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  /// Agent 工具调用分发。
-  Future<void> _onToolCall(Conversation conv, AgentToolCall call) async {
+  /// Agent 工具调用分发（整批）：同类生成只弹一次参数面板。
+  Future<void> _onToolCall(
+      Conversation conv, List<AgentToolCall> calls) async {
     if (!mounted || conv != widget.conversation) return;
-    final prompt = (call.input['prompt'] as String?) ?? '';
 
-    // design_prompt → 直接产出提示词卡片消息，不弹面板。
-    if (call.name == 'design_prompt') {
+    // 1) 提示词卡片逐个产出。
+    for (final call in calls.where((c) => c.name == 'design_prompt')) {
       await widget.store.appendLocalMessage(widget.conversation,
-          text: prompt, sender: Sender.agent, isPromptCard: true);
-      _scrollToBottom();
-      return;
+          text: (call.input['prompt'] as String?) ?? '',
+          sender: Sender.agent,
+          isPromptCard: true);
     }
+    _scrollToBottom();
 
-    final kind =
-        call.name == 'generate_video' ? GenKind.video : GenKind.image;
-    final refUrl = _pendingRefUrl;
+    // 2) 生成调用按类型分组，每组一次参数面板。
+    for (final kind in [GenKind.image, GenKind.video]) {
+      final group = calls
+          .where((c) =>
+              c.name ==
+              (kind == GenKind.image ? 'generate_image' : 'generate_video'))
+          .toList();
+      if (group.isEmpty) continue;
+      if (!mounted) return;
+      await _runGenerationGroup(kind, group);
+    }
+  }
+
+  /// 执行一组同类生成：解析 ref_label 血缘，一次面板参数应用到全部。
+  Future<void> _runGenerationGroup(
+      GenKind kind, List<AgentToolCall> group) async {
+    // 解析每个调用的参考图（引用消息暂存 > ref_label 场景查找）。
+    final quoteRef = _pendingRefUrl;
     _pendingRefUrl = null;
 
-    final result = await showGenParamSheet(context,
-        kind: kind, prompt: prompt, refImageUrl: refUrl);
+    final resolved = group.map((call) {
+      final label = (call.input['label'] as String?)?.trim();
+      final refLabel = (call.input['ref_label'] as String?)?.trim();
+      GenerationTask? parent;
+      if (refLabel != null && refLabel.isNotEmpty) {
+        parent = widget.genStore
+            .findImageByLabel(widget.conversation.id, refLabel);
+      }
+      return (
+        prompt: (call.input['prompt'] as String?) ?? '',
+        label: (label?.isEmpty ?? true) ? null : label,
+        parent: parent,
+      );
+    }).toList();
+
+    final isBatch = group.length > 1;
+    final hasRefs = resolved.any((r) => r.parent != null) ||
+        (quoteRef != null && !isBatch);
+
+    final result = await showGenParamSheet(
+      context,
+      kind: kind,
+      prompt: isBatch ? '' : resolved.first.prompt,
+      refImageUrl: isBatch ? null : (quoteRef ??
+          resolved.first.parent?.resultUrls.firstOrNull),
+      batchCount: group.length,
+      batchRef: isBatch && hasRefs,
+    );
     if (result == null || !mounted) {
-      // 用户取消：留一句话保持上下文完整。
       await widget.store.appendLocalMessage(widget.conversation,
           text: '（已取消本次生成）', sender: Sender.agent);
       return;
     }
-    await _startGeneration(kind, result);
+
+    for (var i = 0; i < resolved.length; i++) {
+      final r = resolved[i];
+      final params = Map<String, String>.of(result.params);
+      // 批量时按各自血缘带参考图；单个时面板已注入。
+      if (isBatch && r.parent != null) {
+        params['imageUrl'] = r.parent!.resultUrls.first;
+      }
+      final task = await widget.genStore.start(
+        conversationId: widget.conversation.id,
+        kind: kind,
+        modelId: result.modelId,
+        prompt: isBatch ? r.prompt : result.prompt,
+        params: params,
+        label: r.label,
+        parentTaskId: r.parent?.id,
+      );
+      final tag = r.label != null ? '·${r.label}' : '';
+      await widget.store.appendLocalMessage(widget.conversation,
+          text: kind == GenKind.image ? '[图片生成$tag]' : '[视频生成$tag]',
+          sender: Sender.agent,
+          taskId: task.id);
+    }
+    _scrollToBottom();
   }
 
   /// 提示词卡片一键生成：直接弹参数面板（prompt=卡片全文，不经 Agent）。

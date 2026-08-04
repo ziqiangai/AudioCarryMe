@@ -18,9 +18,10 @@ class ChatStore extends ChangeNotifier {
   final ChatStorage _storage;
   final List<Conversation> _conversations = [];
 
-  /// 工具调用回调：由当前打开的聊天页注册，收到 agent 的
-  /// generate_image / generate_video 调用时弹参数面板。
-  void Function(Conversation conversation, AgentToolCall call)? toolCallHandler;
+  /// 工具调用回调：由当前打开的聊天页注册。一轮回复里的所有工具调用
+  /// 作为一个整体传入——同类批量生成只弹一次参数面板。
+  void Function(Conversation conversation, List<AgentToolCall> calls)?
+      toolCallHandler;
 
   /// 追加一条本地消息（生成任务气泡、提示词卡片、系统提示），落库并刷新。
   Future<Message> appendLocalMessage(
@@ -225,9 +226,9 @@ class ChatStore extends ChangeNotifier {
     assert(streamDone);
     notifyListeners();
 
-    // 文本吐完后再派发工具调用（弹参数面板），保证阅读顺序自然。
-    for (final call in toolCalls) {
-      toolCallHandler?.call(conversation, call);
+    // 文本吐完后再整批派发工具调用（同类批量只弹一次参数面板）。
+    if (toolCalls.isNotEmpty) {
+      toolCallHandler?.call(conversation, List.of(toolCalls));
     }
   }
 }

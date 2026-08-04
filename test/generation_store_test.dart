@@ -181,6 +181,48 @@ void main() {
     expect(t.error, contains('重试'));
   });
 
+  test('血缘：findImageByLabel 找到同会话同标签最新成功图', () async {
+    final storage = RecordingStorage();
+    final ppio = PpioService(
+        client: MockClient((_) async => _json({
+              'images': ['https://x/s1.png']
+            })));
+    final store = GenerationStore(ppio, storage,
+        pollInterval: const Duration(milliseconds: 1));
+
+    final t1 = await store.start(
+      conversationId: 'c1',
+      kind: GenKind.image,
+      modelId: 'seedream-5.0-lite',
+      prompt: '场景一的画面',
+      params: {},
+      label: '场景1',
+    );
+    await pump();
+    expect(t1.status, GenTaskStatus.succeeded);
+
+    // ref_label 解析：命中
+    final found = store.findImageByLabel('c1', '场景1');
+    expect(found, isNotNull);
+    expect(found!.id, t1.id);
+    // 其他会话/标签不命中
+    expect(store.findImageByLabel('c2', '场景1'), isNull);
+    expect(store.findImageByLabel('c1', '场景2'), isNull);
+
+    // 视频任务带血缘
+    final v = await store.start(
+      conversationId: 'c1',
+      kind: GenKind.video,
+      modelId: 'kling-v3.0-std',
+      prompt: '场景一的画面',
+      params: {'imageUrl': found.resultUrls.first},
+      label: '场景1',
+      parentTaskId: found.id,
+    );
+    expect(v.parentTaskId, t1.id);
+    expect(v.label, '场景1');
+  });
+
   test('regenerate 用同参数新建任务', () async {
     final storage = RecordingStorage();
     final ppio = PpioService(
