@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../models/conversation.dart';
 import '../models/gen_ref.dart';
@@ -43,7 +44,8 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _input = TextEditingController();
-  final _scroll = ScrollController();
+  final _itemScroll = ItemScrollController();
+  final _itemPositions = ItemPositionsListener.create();
   bool _canSend = false;
 
   /// 当前正在引用的消息（非空时输入框上方显示引用条）。
@@ -198,18 +200,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  /// 尽力滚动到并高亮某条消息（对已构建的项有效）。
+  /// 滚动到并高亮某条消息（scrollTo 支持尚未渲染的 index）。
   void _locateMessage(String id) {
+    final msgs = widget.conversation.messages;
+    final mi = msgs.indexWhere((m) => m.id == id);
+    if (mi < 0) return;
+    final busy = widget.conversation.agentTyping ||
+        widget.conversation.pendingGenCount > 0;
+    final itemIndex = msgs.length - 1 - mi + (busy ? 1 : 0);
     setState(() => _highlightedMsgId = id);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = _msgKeys[id]?.currentContext;
-      if (ctx != null) {
-        Scrollable.ensureVisible(ctx,
-            duration: const Duration(milliseconds: 300),
-            alignment: 0.3,
-            curve: Curves.easeOut);
-      }
-    });
+    if (_itemScroll.isAttached) {
+      _itemScroll.scrollTo(
+        index: itemIndex,
+        alignment: 0.35,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOut,
+      );
+    }
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted && _highlightedMsgId == id) {
         setState(() => _highlightedMsgId = null);
@@ -280,7 +287,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     WidgetsBinding.instance.removeObserver(this);
     _input.dispose();
-    _scroll.dispose();
     super.dispose();
   }
 
@@ -672,21 +678,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// 用户上翻历史时不会被自动拉回。只有明确动作（发送）才主动回底。
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        0, // reverse 列表的底部
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
+      if (_itemScroll.isAttached) _itemScroll.jumpTo(index: 0);
     });
   }
 
   /// 键盘弹出时，若本就贴近底部则保持贴底（倒挂列表大多数情况自动保持）。
   @override
   void didChangeMetrics() {
-    if (_scroll.hasClients && _scroll.position.pixels < 120) {
-      _scrollToBottom();
-    }
+    final atBottom = _itemPositions.itemPositions.value
+        .any((p) => p.index == 0 && p.itemTrailingEdge <= 1.05);
+    if (atBottom) _scrollToBottom();
   }
 
   Future<void> _send() async {
@@ -747,8 +748,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 final busy = conv.agentTyping || conv.pendingGenCount > 0;
                 final count = msgs.length + (busy ? 1 : 0);
                 // reverse 列表：index 0 = 最新（在底部）。
-                return ListView.builder(
-                  controller: _scroll,
+                return ScrollablePositionedList.builder(
+                  itemScrollController: _itemScroll,
+                  itemPositionsListener: _itemPositions,
                   reverse: true,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   itemCount: count,

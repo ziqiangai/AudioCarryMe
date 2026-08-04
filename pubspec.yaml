@@ -54,6 +54,9 @@ dependencies:
   # 视频修剪（原生实现，无 FFmpeg 依赖）。
   video_trimmer: ^5.0.0
 
+  # 可跳到任意 index 的列表（引用条精确定位到尚未渲染的消息）。
+  scrollable_positioned_list: ^0.3.8
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
