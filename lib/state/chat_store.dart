@@ -91,6 +91,39 @@ class ChatStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 截断：删除 [anchor] 之后（不含 anchor）的所有消息。
+  /// 只删聊天消息，关联的生成任务保留（任务中心仍可查）。
+  Future<void> _truncateAfter(Conversation conversation, Message anchor) async {
+    final idx = conversation.messages.indexOf(anchor);
+    if (idx < 0) return;
+    final removed = conversation.messages.sublist(idx + 1);
+    conversation.messages.removeRange(idx + 1, conversation.messages.length);
+    for (final m in removed) {
+      await _storage.deleteMessage(m.id);
+    }
+  }
+
+  /// 从某条消息处重来：删掉它之后的全部；若它是用户消息则重新生成回复。
+  Future<void> restartFrom(Conversation conversation, Message anchor) async {
+    await _truncateAfter(conversation, anchor);
+    notifyListeners();
+    if (anchor.isMine) {
+      await _runAgentTurn(conversation);
+    }
+  }
+
+  /// 编辑用户的某条消息并从此重新生成：改文本 → 删除其后所有 → 重新回答。
+  Future<void> editAndRegenerate(
+      Conversation conversation, Message anchor, String newText) async {
+    final trimmed = newText.trim();
+    if (trimmed.isEmpty || !conversation.messages.contains(anchor)) return;
+    await _truncateAfter(conversation, anchor);
+    anchor.text = trimmed;
+    await _storage.insertMessage(conversation.id, anchor); // replace 落库
+    notifyListeners();
+    await _runAgentTurn(conversation);
+  }
+
   /// 发送一条用户消息，并触发 agent 回复。用户消息与成功的回复都会落库。
   ///
   /// [quoted] 非空时，这条消息会带上对它的引用（快照被引用消息的作者与文本）。

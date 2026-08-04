@@ -69,6 +69,59 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: child,
       );
 
+  /// 回到某条消息处：删掉它之后的全部（用户消息则重新生成回复）。
+  Future<void> _restartFrom(Message msg) async {
+    final regen = msg.isMine;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('回到此处'),
+        content: Text(regen
+            ? '将删除这条之后的所有消息，并基于这条重新生成回复。确定？'
+            : '将删除这条之后的所有消息，从这里继续。确定？'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('确定')),
+        ],
+      ),
+    );
+    if (ok == true) await widget.store.restartFrom(widget.conversation, msg);
+  }
+
+  /// 编辑我的某条消息并从此重新生成。
+  Future<void> _editMessage(Message msg) async {
+    final ctl = TextEditingController(text: msg.text);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('编辑消息'),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          minLines: 1,
+          maxLines: 6,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, ctl.text),
+              child: const Text('保存并重发')),
+        ],
+      ),
+    );
+    if (result != null && result.trim().isNotEmpty) {
+      await widget.store.editAndRegenerate(widget.conversation, msg, result);
+      _scrollToBottom();
+    }
+  }
+
   /// 点击引用条 → 定位到被引用的原消息（卡片或来源图任务）并高亮。
   void _onRefTap(GenRef ref) {
     String? targetMsgId;
@@ -784,6 +837,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       showCursor: showCursor,
       onQuote: () => setState(() => _quoting = msg),
       onDelete: () => widget.store.deleteMessage(conv, msg),
+      onRestart: () => _restartFrom(msg),
+      onEdit: msg.isMine ? () => _editMessage(msg) : null,
     );
   }
 }
@@ -921,11 +976,17 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback onQuote;
   final VoidCallback onDelete;
 
+  /// 编辑（仅我的消息）与「回到此处重来」。
+  final VoidCallback? onEdit;
+  final VoidCallback onRestart;
+
   const _MessageBubble({
     required this.message,
     required this.peerName,
     required this.onQuote,
     required this.onDelete,
+    required this.onRestart,
+    this.onEdit,
     this.showCursor = false,
   });
 
@@ -979,6 +1040,15 @@ class _MessageBubble extends StatelessWidget {
                     (Icons.format_quote_rounded, '引用', () {
                       editableState.hideToolbar();
                       onQuote();
+                    }),
+                    if (onEdit != null)
+                      (Icons.edit_outlined, '编辑', () {
+                        editableState.hideToolbar();
+                        onEdit!();
+                      }),
+                    (Icons.restart_alt_rounded, '回到此处', () {
+                      editableState.hideToolbar();
+                      onRestart();
                     }),
                     (Icons.delete_outline_rounded, '删除', () {
                       editableState.hideToolbar();
