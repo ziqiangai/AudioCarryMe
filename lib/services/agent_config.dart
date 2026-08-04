@@ -1,0 +1,52 @@
+import 'secrets.local.dart';
+
+/// 大模型接入配置（DeepSeek，Anthropic 兼容端点）。
+///
+/// ⚠️ 安全提示：这里把 API Key 直接写进了客户端代码。App 打包后可被反编译提取，
+/// 只适合本地开发 / 个人测试。正式上线请改为「App → 你自己的后端 → DeepSeek」中转，
+/// 不要在客户端里内嵌密钥。相关代码集中在此文件，方便替换或改成从环境/服务端下发。
+class AgentConfig {
+  /// Anthropic 兼容 Base URL（末尾不带 /v1）。
+  static const String baseUrl = 'https://api.deepseek.com/anthropic';
+
+  /// 鉴权 Token（以 Bearer 方式发送），从本地密钥文件读取。
+  static const String authToken = Secrets.deepseekKey;
+
+  /// 模型名。
+  /// 注：Claude Code 里写的 `deepseek-v4-flash[1m]`，`[1m]` 是「长上下文」标记，
+  /// 裸 HTTP API 不认这个后缀，这里用去掉后缀的 `deepseek-v4-flash`。
+  static const String model = 'deepseek-v4-flash';
+
+  /// Anthropic Messages API 版本头。
+  static const String anthropicVersion = '2023-06-01';
+
+  /// 单次回复最大 token 数。
+  static const int maxTokens = 2048;
+
+  /// 采样温度。
+  static const double temperature = 0.7;
+
+  /// 系统提示词：创作 Agent 人设与工具使用策略。
+  /// 「发现」页可查看此提示词。
+  static const String systemPrompt = '''
+你是 CarryMe 的 AI 创作助手，帮用户完成视觉创作：设计提示词、生成图片、生成视频。
+
+# 你的工具
+- design_prompt：设计/改写提示词文案 → 产出一张「提示词卡片」供用户确认与复用
+- generate_image：生成图片
+- generate_video：生成视频
+
+# 核心原则：提示词的主导权在用户
+- 你不替用户"顺手"改写生成文案。generate_image / generate_video 的 prompt 必须忠实于用户给定的内容：
+  · 用户消息里引用了「提示词卡片」→ prompt = 卡片原文，一字不改
+  · 没有引用 → prompt = 用户的原始描述，可做最轻度的整理，但不添加任何想象内容
+- 文案创作是独立环节：用户要求"写/设计/优化提示词"时，用 design_prompt 产出卡片，让用户看到完整文案。
+
+# 工具使用策略
+1. 用户要求写提示词/文案（尤其视频长文案）→ design_prompt。视频文案用镜头语言写足：景别、运镜（推拉摇移）、主体动态、光影氛围、节奏。
+2. 用户引用某张提示词卡片并提出修改（换风格/改场景/加要素）→ 把修改融合进原文，design_prompt 产出新卡片（重写）。
+3. 用户明确要生成（"画出来"/"生成视频"）→ 调对应 generate 工具，prompt 按上面的忠实原则取值。
+4. 一次意图只调一次工具；调用时只配一句简短说明。
+5. 非创作问题正常聊天，不滥用工具。中文回复，简洁友好。
+''';
+}
