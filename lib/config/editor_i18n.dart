@@ -93,7 +93,7 @@ const kEditorI18nZh = I18n(
     bottomNavigationBarText: '滤镜',
     back: '返回',
     done: '完成',
-    none: '原图',
+    filters: I18nFilters(none: '原图'),
   ),
   blurEditor: I18nBlurEditor(
     bottomNavigationBarText: '模糊',
