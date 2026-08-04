@@ -12,9 +12,20 @@ import 'ppio_config.dart';
 class PpioSubmitResult {
   final List<String>? urls; // 同步完成
   final String? ppioTaskId; // 异步任务
-  const PpioSubmitResult.sync(this.urls) : ppioTaskId = null;
-  const PpioSubmitResult.async(this.ppioTaskId) : urls = null;
+  final String? traceId; // 供应商 x-trace-id，反馈问题用
+  const PpioSubmitResult.sync(this.urls, {this.traceId}) : ppioTaskId = null;
+  const PpioSubmitResult.async(this.ppioTaskId, {this.traceId}) : urls = null;
   bool get isSync => urls != null;
+}
+
+/// 提交失败异常：带 traceId 便于反馈供应商。
+class PpioException implements Exception {
+  final String message;
+  final String? traceId;
+  const PpioException(this.message, {this.traceId});
+  @override
+  String toString() =>
+      traceId == null ? message : '$message\ntrace: $traceId';
 }
 
 /// 轮询结果。
@@ -24,7 +35,9 @@ class PpioPollResult {
   final PpioPollStatus status;
   final List<String> urls;
   final String? error;
-  const PpioPollResult(this.status, {this.urls = const [], this.error});
+  final String? traceId;
+  const PpioPollResult(this.status,
+      {this.urls = const [], this.error, this.traceId});
 }
 
 /// PPIO 生成服务：按模型族构造请求体（含各家的坑），统一轮询。
@@ -44,12 +57,7 @@ class PpioService {
         'authorization': 'Bearer ${PpioConfig.apiKey}',
       };
 
-  Map<String, String> get _novitaHeaders => {
-        'content-type': 'application/json',
-        'authorization': 'Bearer ${PpioConfig.novitaApiKey}',
-      };
-
-  /// Seedance 走 Novita bytedance 代理（Ark 协议），与 PPIO 标准异步不同。
+  /// Seedance 走 PPIO 的 bytedance 代理（Ark 协议），与 PPIO 标准异步不同。
   static bool isSeedance(String modelId) => modelId.startsWith('seedance');
 
   /// 提交一个任务。抛异常 = 提交失败。
@@ -64,22 +72,25 @@ class PpioService {
       headers: _headers,
       body: jsonEncode(body),
     );
+    final trace = resp.headers['x-trace-id'];
     final text = utf8.decode(resp.bodyBytes);
     if (resp.statusCode != 200) {
-      throw Exception('PPIO ${resp.statusCode}：$text');
+      throw PpioException('PPIO ${resp.statusCode}：$text', traceId: trace);
     }
     final data = jsonDecode(text) as Map<String, dynamic>;
 
     if (isSync) {
       final urls = extractImageUrls(data);
-      if (urls.isEmpty) throw Exception('PPIO 同步返回无图片：$text');
-      return PpioSubmitResult.sync(urls);
+      if (urls.isEmpty) {
+        throw PpioException('PPIO 同步返回无图片：$text', traceId: trace);
+      }
+      return PpioSubmitResult.sync(urls, traceId: trace);
     }
     final taskId = data['task_id'] as String?;
     if (taskId == null || taskId.isEmpty) {
-      throw Exception('PPIO 未返回 task_id：$text');
+      throw PpioException('PPIO 未返回 task_id：$text', traceId: trace);
     }
-    return PpioSubmitResult.async(taskId);
+    return PpioSubmitResult.async(taskId, traceId: trace);
   }
 
   /// Seedance 提交：POST /contents/generations/tasks → { id }。
@@ -88,19 +99,20 @@ class PpioService {
     AppLog.i('ppio', '提交 ${task.modelId}（Ark）');
     final resp = await _client.post(
       Uri.parse(
-          '${PpioConfig.novitaBytedanceBaseUrl}/contents/generations/tasks'),
-      headers: _novitaHeaders,
+          '${PpioConfig.bytedanceBaseUrl}/contents/generations/tasks'),
+      headers: _headers,
       body: jsonEncode(body),
     );
+    final trace = resp.headers['x-trace-id'];
     final text = utf8.decode(resp.bodyBytes);
     if (resp.statusCode != 200) {
-      throw Exception('Seedance ${resp.statusCode}：$text');
+      throw PpioException('Seedance ${resp.statusCode}：$text', traceId: trace);
     }
     final id = (jsonDecode(text) as Map<String, dynamic>)['id'] as String?;
     if (id == null || id.isEmpty) {
-      throw Exception('Seedance 未返回 id：$text');
+      throw PpioException('Seedance 未返回 id：$text', traceId: trace);
     }
-    return PpioSubmitResult.async(id);
+    return PpioSubmitResult.async(id, traceId: trace);
   }
 
   /// 查询一次任务状态。[modelId] 用于路由协议（Seedance 走 Ark）。
@@ -112,6 +124,7 @@ class PpioService {
       headers: _headers,
     );
     final text = utf8.decode(resp.bodyBytes);
+    final trace = resp.headers['x-trace-id'];
     if (resp.statusCode != 200) {
       // 查询接口偶发 5xx 当作仍在进行，交由上层重试/超时兜底。
       return const PpioPollResult(PpioPollStatus.running);
@@ -132,7 +145,8 @@ class PpioService {
         final reason =
             ((data['task'] as Map<String, dynamic>?)?['reason'] as String?) ??
                 '生成失败';
-        return PpioPollResult(PpioPollStatus.failed, error: reason);
+        return PpioPollResult(PpioPollStatus.failed,
+            error: reason, traceId: trace);
       case 'TASK_STATUS_QUEUED':
       case 'TASK_STATUS_PROCESSING':
       case 'TASK_STATUS_UNKNOWN': // 新任务短暂 unknown，视为进行中
@@ -148,8 +162,8 @@ class PpioService {
   Future<PpioPollResult> _pollSeedance(String id) async {
     final resp = await _client.get(
       Uri.parse(
-          '${PpioConfig.novitaBytedanceBaseUrl}/contents/generations/tasks/$id'),
-      headers: _novitaHeaders,
+          '${PpioConfig.bytedanceBaseUrl}/contents/generations/tasks/$id'),
+      headers: _headers,
     );
     if (resp.statusCode != 200) {
       // 状态接口 4xx 视为任务侧故障（过期等），5xx 视为暂时不可用。
@@ -159,6 +173,7 @@ class PpioService {
       return PpioPollResult(PpioPollStatus.failed,
           error: 'Seedance 查询 ${resp.statusCode}');
     }
+    final trace = resp.headers['x-trace-id'];
     final data = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
     final status = (data['status'] as String?) ?? '';
     switch (status) {
@@ -178,7 +193,8 @@ class PpioService {
         final err = (data['error'] as Map<String, dynamic>?)?['message']
                 as String? ??
             '生成失败（$status）';
-        return PpioPollResult(PpioPollStatus.failed, error: err);
+        return PpioPollResult(PpioPollStatus.failed,
+            error: err, traceId: trace);
     }
   }
 

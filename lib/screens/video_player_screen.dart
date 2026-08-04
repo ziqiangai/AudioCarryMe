@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -18,7 +20,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   @override
   void initState() {
     super.initState();
-    _ctl = VideoPlayerController.networkUrl(Uri.parse(widget.url))
+    _ctl = (widget.url.startsWith('/')
+        ? VideoPlayerController.file(File(widget.url))
+        : VideoPlayerController.networkUrl(Uri.parse(widget.url)))
       ..initialize().then((_) {
         if (!mounted) return;
         setState(() => _ready = true);

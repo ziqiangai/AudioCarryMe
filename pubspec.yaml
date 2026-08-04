@@ -45,6 +45,9 @@ dependencies:
   # 聊天内播放生成的视频。
   video_player: ^2.9.2
 
+  # 生成产物下载到本地（PPIO 链接会过期）。
+  path_provider: ^2.1.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

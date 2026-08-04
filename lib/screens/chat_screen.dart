@@ -634,15 +634,26 @@ class _ErrorMessageBubble extends StatelessWidget {
                       color: Color(0xFFE5484D))),
             ]),
             const SizedBox(height: 4),
-            Text(
+            // 可选中复制，完整展示不截断。
+            SelectableText(
               message.text,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF996666)),
+              style: const TextStyle(
+                  fontSize: 12, color: Color(0xFF996666), height: 1.45),
             ),
             const SizedBox(height: 6),
             Row(children: [
               _btn('重试', Icons.refresh, onRetry, primary: true),
+              const SizedBox(width: 10),
+              _btn('复制', Icons.copy_rounded, () async {
+                await Clipboard.setData(ClipboardData(text: message.text));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('已复制错误信息'),
+                    duration: Duration(seconds: 1),
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                }
+              }),
               const SizedBox(width: 10),
               _btn('删除', Icons.close, onDelete),
             ]),

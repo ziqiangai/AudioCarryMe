@@ -34,8 +34,14 @@ class GenerationTask {
   /// PPIO 侧任务 id（异步模型才有；seedream 同步无）。
   String? ppioTaskId;
 
-  /// 生成结果 URL 列表（图片或视频）。
+  /// PPIO/Novita 响应头 x-trace-id，反馈问题给供应商时用。
+  String? traceId;
+
+  /// 生成结果 URL 列表（图片或视频）。会过期，仅作下载源与兜底。
   List<String> resultUrls;
+
+  /// 结果的本地缓存路径，与 resultUrls 按下标对齐（下载失败位为空串）。
+  List<String> localPaths;
 
   String? error;
   final DateTime createdAt;
@@ -50,16 +56,26 @@ class GenerationTask {
     required this.params,
     this.status = GenTaskStatus.draft,
     this.ppioTaskId,
+    this.traceId,
     List<String>? resultUrls,
+    List<String>? localPaths,
     this.error,
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : resultUrls = resultUrls ?? [],
+        localPaths = localPaths ?? [],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
   String get paramsJson => jsonEncode(params);
   String get resultUrlsJson => jsonEncode(resultUrls);
+  String get localPathsJson => jsonEncode(localPaths);
+
+  /// 第 [i] 个产物的本地路径（无缓存返回 null）。
+  String? localAt(int i) =>
+      (i < localPaths.length && localPaths[i].isNotEmpty)
+          ? localPaths[i]
+          : null;
 
   static Map<String, String> decodeParams(String json) =>
       (jsonDecode(json) as Map<String, dynamic>)

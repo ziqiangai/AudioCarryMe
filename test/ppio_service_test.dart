@@ -196,16 +196,31 @@ void main() {
   });
 
   group('seedance 提交与轮询（Ark 协议）', () {
-    test('提交走 novita bytedance、返回 {id}', () async {
+    test('提交失败抛 PpioException 且带 traceId', () async {
+      final svc = PpioService(client: MockClient((_) async =>
+          http.Response('{"code":400}', 400,
+              headers: {'x-trace-id': 't-err'})));
+      try {
+        await svc.submit(task('seedance-2.0', GenKind.video, {}));
+        fail('应抛异常');
+      } on PpioException catch (e) {
+        expect(e.traceId, 't-err');
+        expect(e.toString(), contains('trace: t-err'));
+      }
+    });
+
+    test('提交走 PPIO 国内 bytedance、返回 {id} 并捕获 trace', () async {
       final svc = PpioService(client: MockClient((req) async {
-        expect(req.url.host, 'api.novita.ai');
+        expect(req.url.host, 'api.ppio.com');
         expect(req.url.path, endsWith('/contents/generations/tasks'));
         final body = jsonDecode(req.body) as Map<String, dynamic>;
         expect(body['model'], startsWith('doubao-seedance'));
-        return http.Response(jsonEncode({'id': 'ark-1'}), 200);
+        return http.Response(jsonEncode({'id': 'ark-1'}), 200,
+            headers: {'x-trace-id': 'trace-abc'});
       }));
       final r = await svc.submit(task('seedance-2.0', GenKind.video, {}));
       expect(r.ppioTaskId, 'ark-1');
+      expect(r.traceId, 'trace-abc');
     });
 
     test('轮询映射：succeeded→video_url；running；failed 带 error', () async {

@@ -9,10 +9,8 @@ class PpioConfig {
 
   static const String apiKey = Secrets.ppioKey;
 
-  /// Novita（PPIO 国际版）：Seedance 2.0 走 bytedance 代理（Ark 协议）。
-  static const String novitaBytedanceBaseUrl =
-      'https://api.novita.ai/v3/bytedance';
-  static const String novitaApiKey = Secrets.novitaKey;
+  /// Seedance 2.0 的 bytedance 代理（Ark 协议）——走 PPIO 国内域名，同一把 key。
+  static const String bytedanceBaseUrl = '$baseUrl/bytedance';
 
   /// 轮询间隔与上限（15 分钟兜底）。
   static const Duration pollInterval = Duration(seconds: 3);

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -32,6 +34,10 @@ class GenTaskDetailScreen extends StatelessWidget {
               _Preview(task: task),
               const SizedBox(height: 12),
               _StatusCard(task: task),
+              if (task.status == GenTaskStatus.succeeded) ...[
+                const SizedBox(height: 12),
+                _DownloadCard(task: task, store: store),
+              ],
               const SizedBox(height: 12),
               _PromptCard(task: task),
               const SizedBox(height: 12),
@@ -58,7 +64,8 @@ class _Preview extends StatelessWidget {
     if (task.kind == GenKind.video) {
       return GestureDetector(
         onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => VideoPlayerScreen(url: task.resultUrls.first),
+          builder: (_) => VideoPlayerScreen(
+              url: task.localAt(0) ?? task.resultUrls.first),
         )),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(14),
@@ -86,14 +93,19 @@ class _Preview extends StatelessWidget {
                 backgroundColor: Colors.transparent,
                 body: Center(
                   child: InteractiveViewer(
-                      maxScale: 5, child: Image.network(task.resultUrls[i])),
+                      maxScale: 5,
+                      child: task.localAt(i) != null
+                          ? Image.file(File(task.localAt(i)!))
+                          : Image.network(task.resultUrls[i])),
                 ),
               ),
             ),
           )),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
-            child: Image.network(task.resultUrls[i], fit: BoxFit.cover),
+            child: task.localAt(i) != null
+                ? Image.file(File(task.localAt(i)!), fit: BoxFit.cover)
+                : Image.network(task.resultUrls[i], fit: BoxFit.cover),
           ),
         ),
       ],
@@ -150,6 +162,99 @@ class _StatusCard extends StatelessWidget {
             width: 16,
             height: 16,
             child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+      ]),
+    );
+  }
+}
+
+/// 下载与产物链接：本地保存状态 + 每个 URL 可复制。
+class _DownloadCard extends StatelessWidget {
+  final GenerationTask task;
+  final GenerationStore store;
+  const _DownloadCard({required this.task, required this.store});
+
+  @override
+  Widget build(BuildContext context) {
+    final cached = GenerationStore.isFullyCached(task);
+    final downloading = store.isDownloading(task.id);
+    return _card(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Text('产物', style: _titleStyle),
+          const Spacer(),
+          if (cached)
+            const Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.check_circle, size: 14, color: Color(0xFF07C160)),
+              SizedBox(width: 4),
+              Text('已保存到本地',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF07C160))),
+            ])
+          else
+            SizedBox(
+              height: 28,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  side: const BorderSide(color: Color(0xFF2E7CF6)),
+                  foregroundColor: const Color(0xFF2E7CF6),
+                ),
+                icon: downloading
+                    ? const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.download_rounded, size: 15),
+                label: Text(downloading ? '下载中…' : '下载到本地',
+                    style: const TextStyle(fontSize: 12)),
+                onPressed:
+                    downloading ? null : () => store.downloadMedia(task),
+              ),
+            ),
+        ]),
+        if (!cached) ...[
+          const SizedBox(height: 4),
+          Text(
+            '供应商源链接有效期约 1 小时，过期后未下载的内容将无法查看',
+            style: const TextStyle(fontSize: 11, color: Color(0xFFE8912A)),
+          ),
+        ],
+        const SizedBox(height: 8),
+        for (var i = 0; i < task.resultUrls.length; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('#${i + 1}',
+                  style: const TextStyle(
+                      fontSize: 12, color: WeColors.subtitle)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SelectableText(
+                  task.resultUrls[i],
+                  maxLines: 3,
+                  style: const TextStyle(
+                      fontSize: 11.5, color: Color(0xFF555555), height: 1.4),
+                ),
+              ),
+              GestureDetector(
+                onTap: () async {
+                  await Clipboard.setData(
+                      ClipboardData(text: task.resultUrls[i]));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('已复制链接'),
+                      duration: Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ));
+                  }
+                },
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 6, top: 1),
+                  child: Icon(Icons.copy_rounded,
+                      size: 15, color: WeColors.subtitle),
+                ),
+              ),
+            ]),
           ),
       ]),
     );
@@ -257,21 +362,24 @@ class _TimelineCard extends StatelessWidget {
     final elapsed = task.status.isTerminal
         ? task.updatedAt.difference(task.createdAt)
         : DateTime.now().difference(task.createdAt);
-    final rows = <(String, String)>[
-      ('发起时间', _fmt(task.createdAt)),
-      ('更新时间', _fmt(task.updatedAt)),
+    // (标签, 值, 是否提供复制按钮)
+    final rows = <(String, String, bool)>[
+      ('发起时间', _fmt(task.createdAt), false),
+      ('更新时间', _fmt(task.updatedAt), false),
       ('耗时',
           elapsed.inSeconds < 60
               ? '${elapsed.inSeconds} 秒'
-              : '${elapsed.inMinutes} 分 ${elapsed.inSeconds % 60} 秒'),
-      if (task.ppioTaskId != null) ('PPIO 任务', task.ppioTaskId!),
-      if (task.error != null) ('错误', task.error!),
+              : '${elapsed.inMinutes} 分 ${elapsed.inSeconds % 60} 秒',
+          false),
+      if (task.ppioTaskId != null) ('PPIO 任务', task.ppioTaskId!, true),
+      if (task.traceId != null) ('Trace ID', task.traceId!, true),
+      if (task.error != null) ('错误', task.error!, true),
     ];
     return _card(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('时间线', style: _titleStyle),
         const SizedBox(height: 6),
-        for (final (k, v) in rows)
+        for (final (k, v, copyable) in rows)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 5),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -282,13 +390,35 @@ class _TimelineCard extends StatelessWidget {
                         fontSize: 13, color: Color(0xFF888888))),
               ),
               Expanded(
-                child: Text(v,
+                child: SelectableText(v,
                     style: TextStyle(
                         fontSize: 13,
+                        height: 1.45,
                         color: k == '错误'
                             ? const Color(0xFFE5484D)
                             : Colors.black87)),
               ),
+              if (copyable)
+                Builder(
+                  builder: (context) => GestureDetector(
+                    onTap: () async {
+                      await Clipboard.setData(ClipboardData(text: v));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(const SnackBar(
+                          content: Text('已复制'),
+                          duration: Duration(seconds: 1),
+                          behavior: SnackBarBehavior.floating,
+                        ));
+                      }
+                    },
+                    child: const Padding(
+                      padding: EdgeInsets.only(left: 6, top: 1),
+                      child: Icon(Icons.copy_rounded,
+                          size: 15, color: WeColors.subtitle),
+                    ),
+                  ),
+                ),
             ]),
           ),
       ]),

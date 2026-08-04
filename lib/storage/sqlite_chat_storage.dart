@@ -21,7 +21,7 @@ class SqliteChatStorage implements ChatStorage {
     final path = p.join(await getDatabasesPath(), 'carry_me.db');
     final db = await openDatabase(
       path,
-      version: 7,
+      version: 9,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -79,6 +79,16 @@ class SqliteChatStorage implements ChatStorage {
         if (oldVersion < 7) {
           await db.execute(
               'ALTER TABLE messages ADD COLUMN is_error INTEGER NOT NULL DEFAULT 0');
+        }
+        // v7 → v8：生成任务 trace_id。
+        if (oldVersion < 8) {
+          await db.execute(
+              'ALTER TABLE generation_tasks ADD COLUMN trace_id TEXT');
+        }
+        // v8 → v9：生成产物本地缓存路径。
+        if (oldVersion < 9) {
+          await db.execute(
+              "ALTER TABLE generation_tasks ADD COLUMN local_paths TEXT NOT NULL DEFAULT '[]'");
         }
       },
     );
@@ -272,6 +282,8 @@ class SqliteChatStorage implements ChatStorage {
         params          TEXT    NOT NULL,
         status          INTEGER NOT NULL,
         ppio_task_id    TEXT,
+        trace_id        TEXT,
+        local_paths     TEXT    NOT NULL DEFAULT '[]',
         result_urls     TEXT    NOT NULL,
         error           TEXT,
         created_at      INTEGER NOT NULL,
@@ -295,6 +307,9 @@ class SqliteChatStorage implements ChatStorage {
               params: GenerationTask.decodeParams(r['params'] as String),
               status: GenTaskStatus.values[r['status'] as int],
               ppioTaskId: r['ppio_task_id'] as String?,
+              traceId: r['trace_id'] as String?,
+              localPaths: GenerationTask.decodeUrls(
+                  (r['local_paths'] as String?) ?? '[]'),
               resultUrls: GenerationTask.decodeUrls(r['result_urls'] as String),
               error: r['error'] as String?,
               createdAt:
@@ -318,6 +333,8 @@ class SqliteChatStorage implements ChatStorage {
         'params': task.paramsJson,
         'status': task.status.index,
         'ppio_task_id': task.ppioTaskId,
+      'trace_id': task.traceId,
+      'local_paths': task.localPathsJson,
         'result_urls': task.resultUrlsJson,
         'error': task.error,
         'created_at': task.createdAt.millisecondsSinceEpoch,

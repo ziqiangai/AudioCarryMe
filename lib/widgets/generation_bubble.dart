@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/generation_task.dart';
@@ -34,7 +37,7 @@ class GenerationBubble extends StatelessWidget {
         return GestureDetector(
           onLongPressStart: (d) => onLongPress?.call(task, d.globalPosition),
           child: switch (task.status) {
-            GenTaskStatus.succeeded => _ResultView(task: task),
+            GenTaskStatus.succeeded => _ResultView(task: task, store: store),
             GenTaskStatus.failed => _ErrorView(task: task, store: store),
             _ => _SkeletonView(task: task),
           },
@@ -172,13 +175,24 @@ class _SkeletonViewState extends State<_SkeletonView>
 
 // ---------- 成功结果 ----------
 
+/// 未下载媒体的过期提示（PPIO 官方缓存约 1 小时）。
+String _expiryHint(GenerationTask task) {
+  final deadline = task.updatedAt.add(const Duration(hours: 1));
+  final left = deadline.difference(DateTime.now());
+  if (left.isNegative) return '源链接可能已过期，请尽快尝试下载';
+  return '源链接约 ${left.inMinutes + 1} 分钟后过期，建议下载保存';
+}
+
 class _ResultView extends StatelessWidget {
   final GenerationTask task;
-  const _ResultView({required this.task});
+  final GenerationStore store;
+  const _ResultView({required this.task, required this.store});
 
   @override
   Widget build(BuildContext context) {
     final model = ModelCatalog.byId(task.modelId);
+    final cached = GenerationStore.isFullyCached(task);
+    final downloading = store.isDownloading(task.id);
     return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -186,7 +200,9 @@ class _ResultView extends StatelessWidget {
           if (task.kind == GenKind.image)
             ..._imageViews(context)
           else
-            _InlineVideo(url: task.resultUrls.first, aspect: _aspectOf(task)),
+            _InlineVideo(
+                source: task.localAt(0) ?? task.resultUrls.first,
+                aspect: _aspectOf(task)),
           const SizedBox(height: 6),
           Row(
             children: [
@@ -206,8 +222,49 @@ class _ResultView extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (cached)
+                const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.check_circle, size: 12, color: WeColors.green),
+                  SizedBox(width: 3),
+                  Text('已保存',
+                      style:
+                          TextStyle(fontSize: 11, color: WeColors.green)),
+                ]),
             ],
           ),
+          if (!cached) ...[
+            const SizedBox(height: 6),
+            Row(children: [
+              SizedBox(
+                height: 26,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    side: const BorderSide(color: Color(0xFF2E7CF6)),
+                    foregroundColor: const Color(0xFF2E7CF6),
+                  ),
+                  icon: downloading
+                      ? const SizedBox(
+                          width: 11,
+                          height: 11,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.download_rounded, size: 14),
+                  label: Text(downloading ? '下载中…' : '下载',
+                      style: const TextStyle(fontSize: 11.5)),
+                  onPressed:
+                      downloading ? null : () => store.downloadMedia(task),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _expiryHint(task),
+                  style: const TextStyle(
+                      fontSize: 10, color: Color(0xFFE8912A), height: 1.3),
+                ),
+              ),
+            ]),
+          ],
         ],
       ),
     );
@@ -218,38 +275,15 @@ class _ResultView extends StatelessWidget {
       for (var i = 0; i < task.resultUrls.length; i++) ...[
         if (i > 0) const SizedBox(height: 6),
         GestureDetector(
-          onTap: () => _openViewer(context, task.resultUrls[i]),
+          onTap: () =>
+              _openViewer(context, task.localAt(i) ?? task.resultUrls[i]),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              task.resultUrls[i],
+            child: _taskImage(
+              task,
+              i,
               fit: BoxFit.cover,
               width: double.infinity,
-              loadingBuilder: (context, child, progress) {
-                if (progress == null) return child;
-                return AspectRatio(
-                  aspectRatio: _aspectOf(task),
-                  child: Container(
-                    color: const Color(0xFFF0F1F3),
-                    child: const Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  ),
-                );
-              },
-              errorBuilder: (_, _, _) => AspectRatio(
-                aspectRatio: _aspectOf(task),
-                child: Container(
-                  color: const Color(0xFFF0F1F3),
-                  child: const Center(
-                      child: Icon(Icons.broken_image_outlined,
-                          color: WeColors.subtitle)),
-                ),
-              ),
             ),
           ),
         ),
@@ -257,19 +291,58 @@ class _ResultView extends StatelessWidget {
     ];
   }
 
-  void _openViewer(BuildContext context, String url) {
+  /// 本地缓存优先的图片组件；网络兜底并带加载/破图占位。
+  Widget _taskImage(GenerationTask task, int i,
+      {BoxFit? fit, double? width}) {
+    final local = task.localAt(i);
+    if (local != null) {
+      return Image.file(File(local), fit: fit, width: width);
+    }
+    return Image.network(
+      task.resultUrls[i],
+      fit: fit,
+      width: width,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return AspectRatio(
+          aspectRatio: _aspectOf(task),
+          child: Container(
+            color: const Color(0xFFF0F1F3),
+            child: const Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+        );
+      },
+      errorBuilder: (_, _, _) => AspectRatio(
+        aspectRatio: _aspectOf(task),
+        child: Container(
+          color: const Color(0xFFF0F1F3),
+          child: const Center(
+              child: Icon(Icons.broken_image_outlined,
+                  color: WeColors.subtitle)),
+        ),
+      ),
+    );
+  }
+
+  void _openViewer(BuildContext context, String source) {
     Navigator.of(context).push(PageRouteBuilder(
       opaque: false,
       barrierColor: Colors.black87,
-      pageBuilder: (_, _, _) => _ImageViewer(url: url),
+      pageBuilder: (_, _, _) => _ImageViewer(source: source),
     ));
   }
 }
 
 /// 全屏图片查看（捏合缩放，点按关闭）。
 class _ImageViewer extends StatelessWidget {
-  final String url;
-  const _ImageViewer({required this.url});
+  final String source; // 本地路径或 URL
+  const _ImageViewer({required this.source});
 
   @override
   Widget build(BuildContext context) {
@@ -280,7 +353,9 @@ class _ImageViewer extends StatelessWidget {
         body: Center(
           child: InteractiveViewer(
             maxScale: 5,
-            child: Image.network(url),
+            child: source.startsWith('/')
+                ? Image.file(File(source))
+                : Image.network(source),
           ),
         ),
       ),
@@ -290,9 +365,9 @@ class _ImageViewer extends StatelessWidget {
 
 /// 聊天内联视频：首帧 + 播放按钮，点击播放/暂停。
 class _InlineVideo extends StatefulWidget {
-  final String url;
+  final String source; // 本地路径或 URL
   final double aspect;
-  const _InlineVideo({required this.url, required this.aspect});
+  const _InlineVideo({required this.source, required this.aspect});
 
   @override
   State<_InlineVideo> createState() => _InlineVideoState();
@@ -305,7 +380,9 @@ class _InlineVideoState extends State<_InlineVideo> {
   @override
   void initState() {
     super.initState();
-    final ctl = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    final ctl = widget.source.startsWith('/')
+        ? VideoPlayerController.file(File(widget.source))
+        : VideoPlayerController.networkUrl(Uri.parse(widget.source));
     _ctl = ctl;
     ctl.initialize().then((_) {
       if (mounted) setState(() => _ready = true);
@@ -346,7 +423,7 @@ class _InlineVideoState extends State<_InlineVideo> {
       onTap: () {
         ctl.pause();
         Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => VideoPlayerScreen(url: widget.url),
+          builder: (_) => VideoPlayerScreen(url: widget.source),
         ));
       },
       child: ClipRRect(
@@ -399,26 +476,61 @@ class _ErrorView extends StatelessWidget {
                     color: Color(0xFFE5484D))),
           ]),
           const SizedBox(height: 4),
-          Text(
+          SelectableText(
             task.error ?? '未知错误',
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12, color: Color(0xFF888888)),
+            style: const TextStyle(
+                fontSize: 12, color: Color(0xFF888888), height: 1.45),
           ),
+          if (task.traceId != null) ...[
+            const SizedBox(height: 4),
+            Text('trace: ${task.traceId}',
+                style:
+                    const TextStyle(fontSize: 10.5, color: Color(0xFFAAAAAA))),
+          ],
           const SizedBox(height: 8),
-          SizedBox(
-            height: 30,
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                side: const BorderSide(color: Color(0xFF2E7CF6)),
-                foregroundColor: const Color(0xFF2E7CF6),
+          Row(children: [
+            SizedBox(
+              height: 30,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  side: const BorderSide(color: Color(0xFF2E7CF6)),
+                  foregroundColor: const Color(0xFF2E7CF6),
+                ),
+                icon: const Icon(Icons.refresh, size: 15),
+                label: const Text('重试', style: TextStyle(fontSize: 12)),
+                onPressed: () => store.retry(task),
               ),
-              icon: const Icon(Icons.refresh, size: 15),
-              label: const Text('重试', style: TextStyle(fontSize: 12)),
-              onPressed: () => store.retry(task),
             ),
-          ),
+            const SizedBox(width: 8),
+            SizedBox(
+              height: 30,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  side: const BorderSide(color: Color(0xFFCCCCCC)),
+                  foregroundColor: const Color(0xFF888888),
+                ),
+                icon: const Icon(Icons.copy_rounded, size: 14),
+                label: const Text('复制', style: TextStyle(fontSize: 12)),
+                onPressed: () async {
+                  final text = [
+                    task.error ?? '未知错误',
+                    if (task.traceId != null) 'trace: ${task.traceId}',
+                    if (task.ppioTaskId != null) 'task: ${task.ppioTaskId}',
+                  ].join('\n');
+                  await Clipboard.setData(ClipboardData(text: text));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('已复制'),
+                      duration: Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ));
+                  }
+                },
+              ),
+            ),
+          ]),
         ],
       ),
     );

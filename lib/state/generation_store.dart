@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../logging/app_log.dart';
 import '../models/generation_task.dart';
 import '../models/model_catalog.dart';
+import '../services/media_cache.dart';
 import '../services/ppio_config.dart';
 import '../services/ppio_service.dart';
 import '../storage/chat_storage.dart';
@@ -16,12 +17,17 @@ import '../storage/chat_storage.dart';
 /// 没有 ppioTaskId 的 submitting 任务视为提交失败。
 class GenerationStore extends ChangeNotifier {
   GenerationStore(this._ppio, this._storage,
-      {Duration? pollInterval})
-      : _pollInterval = pollInterval ?? PpioConfig.pollInterval;
+      {Duration? pollInterval, MediaCache? mediaCache})
+      : _pollInterval = pollInterval ?? PpioConfig.pollInterval,
+        // ignore: prefer_initializing_formals
+        _mediaCache = mediaCache;
 
   final PpioService _ppio;
   final ChatStorage _storage;
   final Duration _pollInterval;
+
+  /// 产物本地缓存（PPIO 链接会过期）；测试可不注入。
+  final MediaCache? _mediaCache;
   final Map<String, GenerationTask> _tasks = {};
   final Set<String> _polling = {}; // 防止同一任务起多个轮询循环
 
@@ -117,6 +123,7 @@ class GenerationStore extends ChangeNotifier {
         await _update(task, (t) {
           t.status = GenTaskStatus.succeeded;
           t.resultUrls = result.urls!;
+          t.traceId = result.traceId ?? t.traceId;
         });
         AppLog.i('gen', '任务 ${task.id} 同步完成 ${result.urls!.length} 个产物');
         return;
@@ -124,6 +131,7 @@ class GenerationStore extends ChangeNotifier {
       await _update(task, (t) {
         t.ppioTaskId = result.ppioTaskId;
         t.status = GenTaskStatus.queued;
+        t.traceId = result.traceId ?? t.traceId;
       });
       unawaited(_pollLoop(task));
     } catch (e) {
@@ -131,6 +139,7 @@ class GenerationStore extends ChangeNotifier {
       await _update(task, (t) {
         t.status = GenTaskStatus.failed;
         t.error = e.toString();
+        if (e is PpioException && e.traceId != null) t.traceId = e.traceId;
       });
     }
   }
@@ -162,6 +171,7 @@ class GenerationStore extends ChangeNotifier {
             await _update(task, (t) {
               t.status = GenTaskStatus.failed;
               t.error = r.error ?? '生成失败';
+              t.traceId = r.traceId ?? t.traceId;
             });
             AppLog.w('gen', '任务 ${task.id} 失败：${r.error}');
             return;
@@ -173,6 +183,48 @@ class GenerationStore extends ChangeNotifier {
       });
     } finally {
       _polling.remove(task.id);
+    }
+  }
+
+  final Set<String> _downloading = {};
+
+  /// 任务是否正在下载产物。
+  bool isDownloading(String taskId) => _downloading.contains(taskId);
+
+  /// 任务产物是否已全部缓存到本地。
+  static bool isFullyCached(GenerationTask task) =>
+      task.resultUrls.isNotEmpty &&
+      task.localPaths.where((p) => p.isNotEmpty).length >=
+          task.resultUrls.length;
+
+  /// 用户主动下载任务产物到本地（幂等：已缓存下标跳过）。
+  /// 返回是否全部成功。
+  Future<bool> downloadMedia(GenerationTask task) async {
+    final cache = _mediaCache;
+    if (cache == null || _downloading.contains(task.id)) return false;
+    _downloading.add(task.id);
+    notifyListeners();
+    try {
+      final paths = List<String>.generate(
+          task.resultUrls.length,
+          (i) => i < task.localPaths.length ? task.localPaths[i] : '');
+      var changed = false;
+      for (var i = 0; i < task.resultUrls.length; i++) {
+        if (paths[i].isNotEmpty) continue;
+        final local =
+            await cache.download(task.resultUrls[i], '${task.id}_$i');
+        if (local != null) {
+          paths[i] = local;
+          changed = true;
+        }
+      }
+      if (changed) {
+        await _update(task, (t) => t.localPaths = paths);
+      }
+      return isFullyCached(task);
+    } finally {
+      _downloading.remove(task.id);
+      notifyListeners();
     }
   }
 

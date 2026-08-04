@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'logging/app_log.dart';
 import 'screens/home_screen.dart';
 import 'services/deepseek_agent_service.dart';
+import 'services/media_cache.dart';
 import 'services/ppio_service.dart';
 import 'state/chat_store.dart';
 import 'state/generation_store.dart';
@@ -26,7 +27,8 @@ Future<void> main() async {
   await logStore.load();
 
   // 生成任务：加载历史 + 恢复未完成任务的轮询（App 被杀重启场景）。
-  final genStore = GenerationStore(PpioService(), storage);
+  final genStore =
+      GenerationStore(PpioService(), storage, mediaCache: MediaCache());
   await genStore.load();
 
   // 真实大模型：DeepSeek（Anthropic 兼容端点），配置见 services/agent_config.dart。

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/generation_task.dart';
@@ -252,14 +254,19 @@ class _Thumb extends StatelessWidget {
     Widget inner;
     if (task.status == GenTaskStatus.succeeded && task.resultUrls.isNotEmpty) {
       if (isImage) {
-        inner = Image.network(
-          task.resultUrls.first,
-          fit: BoxFit.cover,
-          width: size,
-          height: size,
-          errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined,
-              color: WeColors.subtitle),
-        );
+        final local = task.localAt(0);
+        inner = local != null
+            ? Image.file(File(local),
+                fit: BoxFit.cover, width: size, height: size)
+            : Image.network(
+                task.resultUrls.first,
+                fit: BoxFit.cover,
+                width: size,
+                height: size,
+                errorBuilder: (_, _, _) => const Icon(
+                    Icons.broken_image_outlined,
+                    color: WeColors.subtitle),
+              );
       } else {
         inner = Container(
           color: const Color(0xFF1A1A1A),
