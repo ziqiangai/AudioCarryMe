@@ -68,7 +68,7 @@ class DeepseekAgentService implements AgentService {
   @override
   Stream<AgentEvent> respond(Conversation conversation) async* {
     final messages = conversation.messages
-        .where((m) => m.text.trim().isNotEmpty)
+        .where((m) => m.text.trim().isNotEmpty && !m.isError)
         .map((m) {
       final content = m.hasQuote
           ? '> ${m.quotedAuthor}：${m.quotedText}\n\n${m.text}'
@@ -79,7 +79,7 @@ class DeepseekAgentService implements AgentService {
       };
     }).toList();
 
-    final request =
+    http.Request buildRequest() =>
         http.Request('POST', Uri.parse('${AgentConfig.baseUrl}/v1/messages'))
           ..headers.addAll({
             'content-type': 'application/json',
@@ -115,9 +115,22 @@ class DeepseekAgentService implements AgentService {
     final toolJson = <int, StringBuffer>{};
 
     try {
-      final resp = await _client.send(request);
-      if (resp.statusCode != 200) {
+      // 5xx/503 瞬时故障自动重试（最多 3 次，指数退避 1s/2s）。
+      // 此时还未产出任何事件，重试对上层完全透明。
+      http.StreamedResponse resp;
+      var attempt = 0;
+      while (true) {
+        attempt++;
+        resp = await _client.send(buildRequest());
+        if (resp.statusCode == 200) break;
         final body = await resp.stream.bytesToString();
+        final retryable = resp.statusCode >= 500 || resp.statusCode == 429;
+        if (retryable && attempt < 3) {
+          AppLog.w('agent',
+              '模型 ${resp.statusCode}，${attempt}s 后重试（$attempt/2）');
+          await Future.delayed(Duration(seconds: attempt));
+          continue;
+        }
         throw Exception('接口返回 ${resp.statusCode}：$body');
       }
 

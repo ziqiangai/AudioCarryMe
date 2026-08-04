@@ -24,6 +24,9 @@ class Message {
   /// 可复制 / 引用（让 AI 重写）/ 直接拿去生图生视频。
   final bool isPromptCard;
 
+  /// 是否为错误提示消息（请求失败等）。持久化展示，但不进入发给模型的上下文。
+  final bool isError;
+
   Message({
     required this.id,
     required this.text,
@@ -33,6 +36,7 @@ class Message {
     this.quotedText,
     this.taskId,
     this.isPromptCard = false,
+    this.isError = false,
   });
 
   bool get isMine => sender == Sender.me;

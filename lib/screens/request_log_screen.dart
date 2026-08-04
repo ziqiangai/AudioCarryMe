@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/request_log.dart';
 import '../state/request_log_store.dart';
@@ -30,13 +31,108 @@ class RequestLogScreen extends StatelessWidget {
             itemCount: logs.length + 1,
             itemBuilder: (context, i) {
               if (i == 0) return _SummaryCard(logs: logs);
-              return _LogCard(log: logs[i - 1], index: logs.length - i + 1);
+              final log = logs[i - 1];
+              final idx = logs.length - i + 1;
+              return GestureDetector(
+                onTap: () => _showDetail(context, log, idx),
+                child: _LogCard(log: log, index: idx),
+              );
             },
           );
         },
       ),
     );
   }
+}
+
+/// 请求详情底部弹层：全部字段完整展示（可选中），一键复制。
+void _showDetail(BuildContext context, RequestLog log, int index) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  final t = log.startedAt;
+  final fields = <(String, String)>[
+    ('序号', '#$index'),
+    ('状态', log.ok ? '成功' : '失败'),
+    ('发起时间',
+        '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}:${two(t.second)}'),
+    ('响应耗时(首字)', '${log.responseLatency.inMilliseconds} ms'),
+    ('请求耗时', '${log.totalDuration.inMilliseconds} ms'),
+    ('输入 tokens', '${log.inputTokens}'),
+    ('输出 tokens', '${log.outputTokens}'),
+    ('缓存读取', '${log.cacheReadTokens}'),
+    ('缓存写入', '${log.cacheCreationTokens}'),
+    ('缓存命中率', '${(log.cacheHitRate * 100).toStringAsFixed(1)}%'),
+    if (log.error != null) ('错误信息', log.error!),
+  ];
+  final fullText = fields.map((f) => '${f.$1}: ${f.$2}').join('\n');
+
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+    builder: (_) => DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.55,
+      maxChildSize: 0.9,
+      builder: (context, scrollCtl) => Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 10, 4),
+          child: Row(children: [
+            const Text('请求详情',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            TextButton.icon(
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('复制全部'),
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: fullText));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('已复制'),
+                    duration: Duration(seconds: 1),
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                }
+              },
+            ),
+          ]),
+        ),
+        const Divider(height: 1, color: Color(0xFFF0F0F0)),
+        Expanded(
+          child: ListView(
+            controller: scrollCtl,
+            padding: const EdgeInsets.fromLTRB(18, 10, 18, 30),
+            children: [
+              for (final f in fields)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(f.$1,
+                          style: const TextStyle(
+                              fontSize: 12, color: WeColors.subtitle)),
+                      const SizedBox(height: 3),
+                      SelectableText(
+                        f.$2,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          height: 1.5,
+                          color: f.$1 == '错误信息'
+                              ? const Color(0xFFE5484D)
+                              : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ]),
+    ),
+  );
 }
 
 /// 顶部概览卡：总请求数、累计 token、平均首字延迟。

@@ -266,6 +266,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       );
                     }
+                    // 错误消息 → 错误气泡（带重试）。
+                    if (msg.isError) {
+                      return _ErrorMessageBubble(
+                        message: msg,
+                        onRetry: () =>
+                            widget.store.retryAgentReply(conv),
+                        onDelete: () =>
+                            widget.store.deleteMessage(conv, msg),
+                      );
+                    }
                     // 生成任务消息 → 媒体气泡（骨架屏/图片/视频）。
                     if (msg.isGeneration) {
                       return Padding(
@@ -587,6 +597,87 @@ class _QuoteBar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 错误消息气泡：红色调 + 重试/删除。
+class _ErrorMessageBubble extends StatelessWidget {
+  final Message message;
+  final VoidCallback onRetry;
+  final VoidCallback onDelete;
+  const _ErrorMessageBubble({
+    required this.message,
+    required this.onRetry,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 44, vertical: 6),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF5F5),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFF3C9CB)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(children: [
+              Icon(Icons.error_outline, size: 15, color: Color(0xFFE5484D)),
+              SizedBox(width: 6),
+              Text('回复失败',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFE5484D))),
+            ]),
+            const SizedBox(height: 4),
+            Text(
+              message.text,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF996666)),
+            ),
+            const SizedBox(height: 6),
+            Row(children: [
+              _btn('重试', Icons.refresh, onRetry, primary: true),
+              const SizedBox(width: 10),
+              _btn('删除', Icons.close, onDelete),
+            ]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _btn(String label, IconData icon, VoidCallback onTap,
+          {bool primary = false}) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: primary ? const Color(0xFFE5484D) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: primary
+                ? null
+                : Border.all(color: const Color(0xFFDDBBBB)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon,
+                size: 13,
+                color: primary ? Colors.white : const Color(0xFF996666)),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    color:
+                        primary ? Colors.white : const Color(0xFF996666))),
+          ]),
+        ),
+      );
 }
 
 class _TypingBubble extends StatelessWidget {

@@ -21,7 +21,7 @@ class SqliteChatStorage implements ChatStorage {
     final path = p.join(await getDatabasesPath(), 'carry_me.db');
     final db = await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -41,6 +41,7 @@ class SqliteChatStorage implements ChatStorage {
             quoted_text     TEXT,
             task_id         TEXT,
             is_prompt_card  INTEGER NOT NULL DEFAULT 0,
+            is_error        INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
           )''');
         await db.execute(
@@ -74,6 +75,11 @@ class SqliteChatStorage implements ChatStorage {
           await db.execute(
               'ALTER TABLE messages ADD COLUMN is_prompt_card INTEGER NOT NULL DEFAULT 0');
         }
+        // v6 → v7：错误消息标记。
+        if (oldVersion < 7) {
+          await db.execute(
+              'ALTER TABLE messages ADD COLUMN is_error INTEGER NOT NULL DEFAULT 0');
+        }
       },
     );
     return SqliteChatStorage._(db);
@@ -105,6 +111,7 @@ class SqliteChatStorage implements ChatStorage {
           quotedText: m['quoted_text'] as String?,
           taskId: m['task_id'] as String?,
           isPromptCard: (m['is_prompt_card'] as int? ?? 0) == 1,
+          isError: (m['is_error'] as int? ?? 0) == 1,
         ));
       }
       conversations.add(conv);
@@ -139,6 +146,7 @@ class SqliteChatStorage implements ChatStorage {
         'quoted_text': message.quotedText,
         'task_id': message.taskId,
         'is_prompt_card': message.isPromptCard ? 1 : 0,
+        'is_error': message.isError ? 1 : 0,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );

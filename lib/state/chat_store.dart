@@ -117,6 +117,22 @@ class ChatStore extends ChangeNotifier {
     );
     conversation.messages.add(userMsg);
     await _storage.insertMessage(conversation.id, userMsg);
+    await _runAgentTurn(conversation);
+  }
+
+  /// 重试上一轮 agent 回复：移除末尾的错误消息后重新请求。
+  Future<void> retryAgentReply(Conversation conversation) async {
+    while (conversation.messages.isNotEmpty &&
+        conversation.messages.last.isError) {
+      final err = conversation.messages.removeLast();
+      await _storage.deleteMessage(err.id);
+    }
+    notifyListeners();
+    await _runAgentTurn(conversation);
+  }
+
+  /// 跑一轮 agent：流式打字机 + 工具调用收集 + 错误落库。
+  Future<void> _runAgentTurn(Conversation conversation) async {
     conversation.agentTyping = true; // 首个字符前显示「…」
     notifyListeners();
 
@@ -179,18 +195,19 @@ class ChatStore extends ChangeNotifier {
     conversation.streaming = false;
 
     if (streamError != null) {
-      // 出错只在内存里临时显示，不落库；已收到的部分文本保留。
-      final err = '出错了：$streamError';
+      // 错误消息持久化（isError 标记：展示但不进模型上下文），支持一键重试。
       if (started) {
-        agentMsg.text = '${agentMsg.text}\n\n$err';
-      } else {
-        conversation.messages.add(Message(
-          id: _newId('msg'),
-          text: err,
-          sender: Sender.agent,
-          time: DateTime.now(),
-        ));
+        await _storage.insertMessage(conversation.id, agentMsg); // 保留已收到部分
       }
+      final errMsg = Message(
+        id: _newId('msg'),
+        text: '$streamError',
+        sender: Sender.agent,
+        time: DateTime.now(),
+        isError: true,
+      );
+      conversation.messages.add(errMsg);
+      await _storage.insertMessage(conversation.id, errMsg);
     } else if (!started) {
       if (toolCalls.isEmpty) {
         // 一个字符都没返回、也没有工具调用。
