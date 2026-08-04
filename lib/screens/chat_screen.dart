@@ -336,7 +336,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ProImageEditor.file(
         File(local),
-        configs: const ProImageEditorConfigs(i18n: kEditorI18nZh),
+        configs: const ProImageEditorConfigs(
+          i18n: kEditorI18nZh,
+          cropRotateEditor: CropRotateEditorConfigs(
+            aspectRatios: [
+              AspectRatioItem(text: '自由', value: -1),
+              AspectRatioItem(text: '原图', value: 0),
+              AspectRatioItem(text: '1:1', value: 1),
+              AspectRatioItem(text: '4:3', value: 4 / 3),
+              AspectRatioItem(text: '3:4', value: 3 / 4),
+              AspectRatioItem(text: '16:9', value: 16 / 9),
+              AspectRatioItem(text: '9:16', value: 9 / 16),
+            ],
+          ),
+        ),
         callbacks: ProImageEditorCallbacks(
           onImageEditingComplete: (bytes) async {
             final path = await widget.genStore.mediaCache!.saveBytes(

@@ -2,6 +2,11 @@ import 'package:pro_image_editor/pro_image_editor.dart';
 
 /// pro_image_editor 中文文案。
 const kEditorI18nZh = I18n(
+  layerInteraction: I18nLayerInteraction(
+    remove: '删除',
+    edit: '编辑',
+    rotateScale: '旋转缩放',
+  ),
   done: '完成',
   cancel: '取消',
   undo: '撤销',
@@ -24,6 +29,7 @@ const kEditorI18nZh = I18n(
     redo: '重做',
     done: '完成',
     back: '返回',
+    smallScreenMoreTooltip: '更多',
   ),
   textEditor: I18nTextEditor(
     inputHintText: '输入文字',
@@ -33,6 +39,7 @@ const kEditorI18nZh = I18n(
     textAlign: '对齐',
     fontScale: '字号',
     backgroundMode: '背景样式',
+    smallScreenMoreTooltip: '更多',
   ),
   cropRotateEditor: I18nCropRotateEditor(
     bottomNavigationBarText: '裁剪/旋转',
@@ -45,6 +52,7 @@ const kEditorI18nZh = I18n(
     undo: '撤销',
     redo: '重做',
     reset: '重置',
+    smallScreenMoreTooltip: '更多',
   ),
   tuneEditor: I18nTuneEditor(
     bottomNavigationBarText: '调节',
@@ -72,6 +80,10 @@ const kEditorI18nZh = I18n(
   ),
   emojiEditor: I18nEmojiEditor(
     bottomNavigationBarText: '表情',
+    search: '搜索',
+  ),
+  stickerEditor: I18nStickerEditor(
+    bottomNavigationBarText: '贴纸',
   ),
   various: I18nVarious(
     loadingDialogMsg: '请稍候…',

@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'dart:io';
+
+import 'package:path_provider/path_provider.dart';
+
 import 'logging/app_log.dart';
+import 'models/media_paths.dart';
 import 'screens/home_screen.dart';
 import 'services/deepseek_agent_service.dart';
 import 'services/media_cache.dart';
@@ -14,6 +19,11 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 媒体目录（iOS 容器路径每次安装会变，须运行时解析）。
+  final docs = await getApplicationDocumentsDirectory();
+  MediaPaths.mediaDir = '${docs.path}/media';
+  await Directory(MediaPaths.mediaDir!).create(recursive: true);
 
   // 打开本地数据库并加载历史数据。
   final storage = await SqliteChatStorage.open();

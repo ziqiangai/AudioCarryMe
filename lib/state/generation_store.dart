@@ -253,11 +253,14 @@ class GenerationStore extends ChangeNotifier {
   /// 任务是否正在下载产物。
   bool isDownloading(String taskId) => _downloading.contains(taskId);
 
-  /// 任务产物是否已全部缓存到本地。
-  static bool isFullyCached(GenerationTask task) =>
-      task.resultUrls.isNotEmpty &&
-      task.localPaths.where((p) => p.isNotEmpty).length >=
-          task.resultUrls.length;
+  /// 任务产物是否已全部缓存到本地（按当前容器实际可解析判断）。
+  static bool isFullyCached(GenerationTask task) {
+    if (task.resultUrls.isEmpty) return false;
+    for (var i = 0; i < task.resultUrls.length; i++) {
+      if (task.localAt(i) == null) return false;
+    }
+    return true;
+  }
 
   /// 用户主动下载任务产物到本地（幂等：已缓存下标跳过）。
   /// 返回是否全部成功。
@@ -272,7 +275,7 @@ class GenerationStore extends ChangeNotifier {
           (i) => i < task.localPaths.length ? task.localPaths[i] : '');
       var changed = false;
       for (var i = 0; i < task.resultUrls.length; i++) {
-        if (paths[i].isNotEmpty) continue;
+        if (task.localAt(i) != null) continue; // 已有且可解析
         final local =
             await cache.download(task.resultUrls[i], '${task.id}_$i');
         if (local != null) {

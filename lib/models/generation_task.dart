@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'media_paths.dart';
 import 'model_catalog.dart';
 
 /// 生成任务状态机。
@@ -79,11 +80,10 @@ class GenerationTask {
   String get resultUrlsJson => jsonEncode(resultUrls);
   String get localPathsJson => jsonEncode(localPaths);
 
-  /// 第 [i] 个产物的本地路径（无缓存返回 null）。
-  String? localAt(int i) =>
-      (i < localPaths.length && localPaths[i].isNotEmpty)
-          ? localPaths[i]
-          : null;
+  /// 第 [i] 个产物的本地路径（按文件名在当前容器解析；无缓存/文件丢失返回 null）。
+  String? localAt(int i) => (i < localPaths.length)
+      ? MediaPaths.resolve(localPaths[i])
+      : null;
 
   static Map<String, String> decodeParams(String json) =>
       (jsonDecode(json) as Map<String, dynamic>)
