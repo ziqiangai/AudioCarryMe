@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/model_catalog.dart';
@@ -130,12 +132,37 @@ class _GenParamSheetState extends State<_GenParamSheet> {
         _negativeCtl.text.trim().isNotEmpty) {
       params['negativePrompt'] = _negativeCtl.text.trim();
     }
-    if (_hasRef) params['imageUrl'] = widget.refImageUrl!;
+    // 单张参考图在此注入；批量参考图由聊天页按各自血缘逐个注入。
+    if (widget.refImageUrl != null) params['imageUrl'] = widget.refImageUrl!;
     Navigator.of(context).pop(GenSheetResult(
       modelId: _model.id,
       prompt: _promptCtl.text.trim(),
       params: params,
     ));
+  }
+
+  /// 参考图缩略图：兼容本地路径与网络 URL，失败显示占位。
+  Widget _refThumb(String src) {
+    const placeholder = SizedBox(
+      width: 56,
+      height: 56,
+      child: ColoredBox(
+        color: Color(0xFFF0F1F3),
+        child: Icon(Icons.image_outlined, color: WeColors.subtitle),
+      ),
+    );
+    if (src.startsWith('/')) {
+      return Image.file(File(src),
+          width: 56,
+          height: 56,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => placeholder);
+    }
+    return Image.network(src,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => placeholder);
   }
 
   @override
@@ -182,7 +209,8 @@ class _GenParamSheetState extends State<_GenParamSheet> {
                 shrinkWrap: true,
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                 children: [
-                  if (_hasRef) ...[
+                  // 单张参考图预览（批量参考图的说明在下方提示词区展示）。
+                  if (widget.refImageUrl != null) ...[
                     _sectionLabel('参考图'),
                     Container(
                       padding: const EdgeInsets.all(10),
@@ -190,19 +218,7 @@ class _GenParamSheetState extends State<_GenParamSheet> {
                       child: Row(children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            widget.refImageUrl!,
-                            width: 56,
-                            height: 56,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => Container(
-                              width: 56,
-                              height: 56,
-                              color: const Color(0xFFF0F1F3),
-                              child: const Icon(Icons.image_outlined,
-                                  color: WeColors.subtitle),
-                            ),
-                          ),
+                          child: _refThumb(widget.refImageUrl!),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
