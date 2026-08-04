@@ -133,7 +133,7 @@ void main() {
     expect(store.byId('old1')!.status, GenTaskStatus.succeeded);
   });
 
-  test('恢复：submitting 但无 ppioTaskId → 判失败', () async {
+  test('恢复：submitting 无 id 的生图 → 自动重提交并完成', () async {
     final storage = RecordingStorage();
     storage.preloaded.add(GenerationTask(
       id: 'old2',
@@ -145,14 +145,40 @@ void main() {
       status: GenTaskStatus.submitting,
     ));
     final store = GenerationStore(
+        PpioService(
+            client: MockClient((_) async => _json({
+                  'images': ['https://x/auto.png']
+                }))),
+        storage,
+        pollInterval: const Duration(milliseconds: 1));
+
+    await store.load();
+    await pump(100);
+    final t = store.byId('old2')!;
+    expect(t.status, GenTaskStatus.succeeded); // 无感恢复
+    expect(t.resultUrls, ['https://x/auto.png']);
+  });
+
+  test('恢复：submitting 无 id 的视频 → 判失败提示手动重试（防重复扣费）', () async {
+    final storage = RecordingStorage();
+    storage.preloaded.add(GenerationTask(
+      id: 'old3',
+      conversationId: 'c1',
+      kind: GenKind.video,
+      modelId: 'kling-v3.0-std',
+      prompt: 'x',
+      params: {},
+      status: GenTaskStatus.submitting,
+    ));
+    final store = GenerationStore(
         PpioService(client: MockClient((_) async => _json({}))), storage,
         pollInterval: const Duration(milliseconds: 1));
 
     await store.load();
     await pump();
-    final t = store.byId('old2')!;
+    final t = store.byId('old3')!;
     expect(t.status, GenTaskStatus.failed);
-    expect(t.error, contains('提交中断'));
+    expect(t.error, contains('重试'));
   });
 
   test('regenerate 用同参数新建任务', () async {

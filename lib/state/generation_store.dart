@@ -30,6 +30,7 @@ class GenerationStore extends ChangeNotifier {
   final MediaCache? _mediaCache;
   final Map<String, GenerationTask> _tasks = {};
   final Set<String> _polling = {}; // 防止同一任务起多个轮询循环
+  final Set<String> _inFlight = {}; // 提交请求飞行中（本会话内），recover 跳过
 
   int _seq = 0;
   String newTaskId() =>
@@ -57,15 +58,24 @@ class GenerationStore extends ChangeNotifier {
   /// 对非终态任务恢复轮询（App 回前台也调用）。
   Future<void> recover() async {
     for (final t in _tasks.values) {
-      if (!t.status.needsRecovery || _polling.contains(t.id)) continue;
+      if (!t.status.needsRecovery ||
+          _polling.contains(t.id) ||
+          _inFlight.contains(t.id)) {
+        continue; // 本会话请求仍在飞行中，勿误判为中断
+      }
       if (t.ppioTaskId != null) {
         AppLog.i('gen', '恢复轮询 ${t.id}（ppio=${t.ppioTaskId}）');
         unawaited(_pollLoop(t));
+      } else if (t.kind == GenKind.image) {
+        // 同步生图无远端 id 可续查；图片便宜，自动重新提交，体验无感。
+        AppLog.i('gen', '恢复：自动重提交生图任务 ${t.id}');
+        unawaited(_submit(t));
       } else {
-        // 提交中但没拿到远端 id：无从恢复，判失败。
+        // 视频较贵：不自动重提交（原任务可能已在远端计费执行），交用户决定。
         await _update(t, (t) {
           t.status = GenTaskStatus.failed;
-          t.error = '提交中断（App 退出），请重试';
+          t.error = '提交在完成前被中断（App 退出）。为避免重复扣费未自动重试，'
+              '可点「重试」重新提交';
         });
       }
     }
@@ -117,6 +127,7 @@ class GenerationStore extends ChangeNotifier {
   }
 
   Future<void> _submit(GenerationTask task) async {
+    _inFlight.add(task.id);
     try {
       final result = await _ppio.submit(task);
       if (result.isSync) {
@@ -141,6 +152,8 @@ class GenerationStore extends ChangeNotifier {
         t.error = e.toString();
         if (e is PpioException && e.traceId != null) t.traceId = e.traceId;
       });
+    } finally {
+      _inFlight.remove(task.id);
     }
   }
 
