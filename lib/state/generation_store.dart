@@ -61,6 +61,15 @@ class GenerationStore extends ChangeNotifier {
     return list;
   }
 
+  /// 仅某会话的任务，最新在前。
+  List<GenerationTask> forConversation(String conversationId) {
+    final list = _tasks.values
+        .where((t) => t.conversationId == conversationId)
+        .toList();
+    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return list;
+  }
+
   /// 启动时加载 + 恢复轮询。
   Future<void> load() async {
     final loaded = await _storage.loadGenerationTasks();

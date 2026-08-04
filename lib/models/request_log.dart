@@ -29,6 +29,9 @@ class RequestLog {
   /// 失败时的错误信息。
   final String? error;
 
+  /// 所属会话 id（旧记录为 null）。
+  final String? conversationId;
+
   const RequestLog({
     required this.id,
     required this.startedAt,
@@ -40,6 +43,7 @@ class RequestLog {
     required this.totalDuration,
     required this.ok,
     this.error,
+    this.conversationId,
   });
 
   /// 提示词总 token（含缓存部分）。

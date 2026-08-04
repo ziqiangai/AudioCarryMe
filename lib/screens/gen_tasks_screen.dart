@@ -11,17 +11,23 @@ import 'gen_task_detail_screen.dart';
 /// 生成任务中心：每个任务的类型 / 状态 / 耗时 / 参数 / 发起时间 / 结果缩略图。
 class GenTasksScreen extends StatelessWidget {
   final GenerationStore store;
-  const GenTasksScreen({super.key, required this.store});
+
+  /// 非空则只显示该会话的任务。
+  final String? conversationId;
+  const GenTasksScreen(
+      {super.key, required this.store, this.conversationId});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: WeColors.bg,
-      appBar: AppBar(title: const Text('生成任务')),
+      appBar: AppBar(title: Text(conversationId == null ? '生成任务' : '生成任务 · 本会话')),
       body: ListenableBuilder(
         listenable: store,
         builder: (context, _) {
-          final tasks = store.all;
+          final tasks = conversationId == null
+              ? store.all
+              : store.forConversation(conversationId!);
           if (tasks.isEmpty) {
             return const Center(
               child: Text('还没有生成任务\n在聊天里让我画点什么吧',

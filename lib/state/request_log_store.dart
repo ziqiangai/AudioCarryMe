@@ -13,6 +13,10 @@ class RequestLogStore extends ChangeNotifier {
   /// 最新的在最前面。
   List<RequestLog> get logs => List.unmodifiable(_logs);
 
+  /// 仅某会话的请求记录（最新在前）。
+  List<RequestLog> forConversation(String conversationId) => List.unmodifiable(
+      _logs.where((l) => l.conversationId == conversationId));
+
   Future<void> load() async {
     final loaded = await _storage.loadRequestLogs();
     _logs

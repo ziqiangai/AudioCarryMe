@@ -226,6 +226,7 @@ class DeepseekAgentService implements AgentService {
       }
       _logStore?.add(RequestLog(
         id: 'req-${startedAt.microsecondsSinceEpoch}-${_seq++}',
+        conversationId: conversation.id,
         startedAt: startedAt,
         inputTokens: inputTokens,
         cacheReadTokens: cacheRead,

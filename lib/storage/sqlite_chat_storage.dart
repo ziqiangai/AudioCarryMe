@@ -21,7 +21,7 @@ class SqliteChatStorage implements ChatStorage {
     final path = p.join(await getDatabasesPath(), 'carry_me.db');
     final db = await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -96,6 +96,11 @@ class SqliteChatStorage implements ChatStorage {
               'ALTER TABLE generation_tasks ADD COLUMN label TEXT');
           await db.execute(
               'ALTER TABLE generation_tasks ADD COLUMN parent_task_id TEXT');
+        }
+        // v10 → v11：请求记录关联会话。
+        if (oldVersion < 11) {
+          await db.execute(
+              'ALTER TABLE request_logs ADD COLUMN conversation_id TEXT');
         }
       },
     );
@@ -191,7 +196,8 @@ class SqliteChatStorage implements ChatStorage {
         response_latency_ms   INTEGER NOT NULL,
         total_duration_ms     INTEGER NOT NULL,
         ok                    INTEGER NOT NULL,
-        error                 TEXT
+        error                 TEXT,
+        conversation_id       TEXT
       )''');
     await db.execute(
       'CREATE INDEX idx_request_logs_time ON request_logs(started_at DESC)',
@@ -216,6 +222,7 @@ class SqliteChatStorage implements ChatStorage {
                   Duration(milliseconds: r['total_duration_ms'] as int),
               ok: (r['ok'] as int) == 1,
               error: r['error'] as String?,
+              conversationId: r['conversation_id'] as String?,
             ))
         .toList();
   }
@@ -233,6 +240,7 @@ class SqliteChatStorage implements ChatStorage {
       'total_duration_ms': log.totalDuration.inMilliseconds,
       'ok': log.ok ? 1 : 0,
       'error': log.error,
+      'conversation_id': log.conversationId,
     });
   }
 

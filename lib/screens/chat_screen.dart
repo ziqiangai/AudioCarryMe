@@ -518,6 +518,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 _TopMenu(
                   logStore: widget.logStore,
                   genStore: widget.genStore,
+                  conversationId: conv.id,
                   onCopyChat: () => setState(() => _selectMode = true),
                 )
               ],
@@ -747,10 +748,12 @@ class _SelectionBar extends StatelessWidget {
 class _TopMenu extends StatelessWidget {
   final RequestLogStore logStore;
   final GenerationStore genStore;
+  final String conversationId;
   final VoidCallback onCopyChat;
   const _TopMenu({
     required this.logStore,
     required this.genStore,
+    required this.conversationId,
     required this.onCopyChat,
   });
 
@@ -765,11 +768,13 @@ class _TopMenu extends StatelessWidget {
       onSelected: (v) {
         if (v == 'logs') {
           Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => RequestLogScreen(logStore: logStore),
+            builder: (_) => RequestLogScreen(
+                logStore: logStore, conversationId: conversationId),
           ));
         } else if (v == 'gens') {
           Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => GenTasksScreen(store: genStore),
+            builder: (_) => GenTasksScreen(
+                store: genStore, conversationId: conversationId),
           ));
         } else if (v == 'copy') {
           onCopyChat();

@@ -8,17 +8,23 @@ import '../theme.dart';
 /// 大模型请求记录页：概览 + 每次请求的 token / 耗时 / 缓存命中。
 class RequestLogScreen extends StatelessWidget {
   final RequestLogStore logStore;
-  const RequestLogScreen({super.key, required this.logStore});
+
+  /// 非空则只显示该会话的请求记录。
+  final String? conversationId;
+  const RequestLogScreen(
+      {super.key, required this.logStore, this.conversationId});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: WeColors.bg,
-      appBar: AppBar(title: const Text('大模型请求记录')),
+      appBar: AppBar(title: Text(conversationId == null ? '大模型请求记录' : '请求记录 · 本会话')),
       body: ListenableBuilder(
         listenable: logStore,
         builder: (context, _) {
-          final logs = logStore.logs;
+          final logs = conversationId == null
+              ? logStore.logs
+              : logStore.forConversation(conversationId!);
           if (logs.isEmpty) {
             return const Center(
               child: Text('还没有请求记录\n发条消息就会出现',
