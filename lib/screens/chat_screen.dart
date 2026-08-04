@@ -58,16 +58,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _selectMode = false;
   final Set<String> _selectedIds = {};
 
-  /// 引用定位：被高亮的消息 id + 各消息的定位 key。
+  /// 引用/搜索定位时被高亮的消息 id。
   String? _highlightedMsgId;
-  final Map<String, GlobalKey> _msgKeys = {};
 
-  GlobalKey _keyFor(String id) => _msgKeys.putIfAbsent(id, GlobalKey.new);
-
-  /// 列表项统一包一层：提供定位 key + 引用高亮背景。
-  Widget _wrapMsg(String id, Widget child) => Container(
-        key: _keyFor(id),
-        color: _highlightedMsgId == id ? const Color(0x2242A5F5) : null,
+  /// 列表项统一包一层：引用/搜索命中的高亮背景（定位靠 scrollTo(index)，不用 GlobalKey）。
+  Widget _wrapMsg(String id, Widget child) => ColoredBox(
+        color: _highlightedMsgId == id
+            ? const Color(0x2242A5F5)
+            : Colors.transparent,
         child: child,
       );
 
@@ -200,22 +198,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  /// 滚动到并高亮某条消息（scrollTo 支持尚未渲染的 index）。
-  void _locateMessage(String id) {
+  /// 精确滚动到并高亮某条消息（可复用：引用定位、未来搜索定位）。
+  ///
+  /// 两阶段：scrollTo 动画接近 → 动画结束后 jumpTo 校正一次。
+  /// 因为途中项高度可能在渲染后才确定，一次估算会偏；校正时目标已渲染，位置准确。
+  Future<void> locateMessage(String id, {double alignment = 0.25}) async {
     final msgs = widget.conversation.messages;
     final mi = msgs.indexWhere((m) => m.id == id);
-    if (mi < 0) return;
+    if (mi < 0 || !_itemScroll.isAttached) return;
     final busy = widget.conversation.agentTyping ||
         widget.conversation.pendingGenCount > 0;
     final itemIndex = msgs.length - 1 - mi + (busy ? 1 : 0);
+
     setState(() => _highlightedMsgId = id);
-    if (_itemScroll.isAttached) {
-      _itemScroll.scrollTo(
-        index: itemIndex,
-        alignment: 0.35,
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeOut,
-      );
+    await _itemScroll.scrollTo(
+      index: itemIndex,
+      alignment: alignment,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOut,
+    );
+    // 校正：目标此刻已渲染，高度准确，jumpTo 精确对齐。
+    if (mounted && _itemScroll.isAttached) {
+      _itemScroll.jumpTo(index: itemIndex, alignment: alignment);
     }
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted && _highlightedMsgId == id) {
@@ -223,6 +227,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
   }
+
+  void _locateMessage(String id) => locateMessage(id);
 
   void _exitSelectMode() => setState(() {
         _selectMode = false;

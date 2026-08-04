@@ -399,42 +399,35 @@ class _ResultView extends StatelessWidget {
   }
 
   /// 本地缓存优先的图片组件；网络兜底并带加载/破图占位。
-  Widget _taskImage(GenerationTask task, int i,
-      {BoxFit? fit, double? width}) {
+  /// 固定 AspectRatio 包裹，保证加载前后高度恒定（避免定位滚动偏移）。
+  Widget _taskImage(GenerationTask task, int i, {BoxFit? fit, double? width}) {
     final local = task.localAt(i);
-    if (local != null) {
-      return Image.file(File(local), fit: fit, width: width);
-    }
-    return Image.network(
-      task.resultUrls[i],
-      fit: fit,
-      width: width,
-      loadingBuilder: (context, child, progress) {
-        if (progress == null) return child;
-        return AspectRatio(
-          aspectRatio: _aspectOf(task),
-          child: Container(
-            color: const Color(0xFFF0F1F3),
-            child: const Center(
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
+    final Widget inner = local != null
+        ? Image.file(File(local), fit: BoxFit.cover)
+        : Image.network(
+            task.resultUrls[i],
+            fit: BoxFit.cover,
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+              return const ColoredBox(
+                color: Color(0xFFF0F1F3),
+                child: Center(
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              );
+            },
+            errorBuilder: (_, _, _) => const ColoredBox(
+              color: Color(0xFFF0F1F3),
+              child: Center(
+                  child: Icon(Icons.broken_image_outlined,
+                      color: WeColors.subtitle)),
             ),
-          ),
-        );
-      },
-      errorBuilder: (_, _, _) => AspectRatio(
-        aspectRatio: _aspectOf(task),
-        child: Container(
-          color: const Color(0xFFF0F1F3),
-          child: const Center(
-              child: Icon(Icons.broken_image_outlined,
-                  color: WeColors.subtitle)),
-        ),
-      ),
-    );
+          );
+    return AspectRatio(aspectRatio: _aspectOf(task), child: inner);
   }
 
   void _openViewer(BuildContext context, String source) {
