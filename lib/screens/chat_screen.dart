@@ -15,10 +15,11 @@ import '../state/request_log_store.dart';
 import '../theme.dart';
 import '../widgets/generation_bubble.dart';
 import '../widgets/prompt_card.dart';
-import '../services/video_native.dart';
+import '../config/editor_i18n.dart';
 import 'gen_param_sheet.dart';
 import 'gen_tasks_screen.dart';
 import 'request_log_screen.dart';
+import 'video_composer_screen.dart';
 import 'video_trim_screen.dart';
 
 /// 聊天界面：消息气泡列表 + 底部输入栏。
@@ -335,6 +336,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ProImageEditor.file(
         File(local),
+        configs: const ProImageEditorConfigs(i18n: kEditorI18nZh),
         callbacks: ProImageEditorCallbacks(
           onImageEditingComplete: (bytes) async {
             final path = await widget.genStore.mediaCache!.saveBytes(
@@ -389,44 +391,55 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return tasks.length >= 2 ? tasks : const [];
   }
 
-  /// 拼接选中的多段视频（按聊天顺序）。
+  /// 会话内全部成功的视频任务（合成编辑器的候选池，含派生产物）。
+  List<GenerationTask> _allConversationVideos() {
+    final seen = <String>{};
+    final out = <GenerationTask>[];
+    for (final m in widget.conversation.messages) {
+      if (!m.isGeneration) continue;
+      final t = widget.genStore.byId(m.taskId!);
+      if (t != null &&
+          t.kind == GenKind.video &&
+          t.status == GenTaskStatus.succeeded &&
+          t.resultUrls.isNotEmpty &&
+          seen.add(t.id)) {
+        out.add(t);
+      }
+    }
+    return out;
+  }
+
+  /// 打开合成编辑器：多段排序/剪辑/替换/增删 → 导出成片。
   Future<void> _concatSelected() async {
     final tasks = _selectedVideoTasks();
     if (tasks.isEmpty) return;
     _exitSelectMode();
 
     // 逐段确保本地。
-    final paths = <String>[];
+    final segments = <(GenerationTask, String)>[];
     for (final t in tasks) {
       final p = await _ensureLocal(t);
       if (p == null) return;
-      paths.add(p);
+      segments.add((t, p));
     }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('正在拼接 ${paths.length} 段视频…'),
-      duration: const Duration(seconds: 2),
-      behavior: SnackBarBehavior.floating,
+
+    final result =
+        await Navigator.of(context).push<ComposeResult>(MaterialPageRoute(
+      builder: (_) => VideoComposerScreen(
+        initial: segments,
+        available: _allConversationVideos(),
+        genStore: widget.genStore,
+      ),
     ));
-    try {
-      final out = await widget.genStore.mediaCache!.outputPath(
-          'concat-${DateTime.now().millisecondsSinceEpoch}', 'mp4');
-      await VideoNative.concat(paths, out);
-      await _appendDerived(
-        source: tasks.first,
-        kind: GenKind.video,
-        modelId: 'local-concat',
-        localPath: out,
-        messageTag: '拼接成片×${paths.length}',
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('拼接失败：$e'),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
-    }
+    if (result == null || !mounted) return;
+    await _appendDerived(
+      source: tasks.first,
+      kind: GenKind.video,
+      modelId: 'local-concat',
+      localPath: result.path,
+      messageTag: '拼接成片×${result.count}',
+    );
   }
 
   /// 列表用 reverse:true 倒挂：偏移 0 即底部，新消息天然贴底，
