@@ -48,6 +48,12 @@ dependencies:
   # 生成产物下载到本地（PPIO 链接会过期）。
   path_provider: ^2.1.4
 
+  # 图片编辑器（裁剪/涂鸦/文字/滤镜，全套 UI）。
+  pro_image_editor: ^13.3.0
+
+  # 视频修剪（原生实现，无 FFmpeg 依赖）。
+  video_trimmer: ^5.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

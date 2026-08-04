@@ -28,6 +28,7 @@ class GenerationStore extends ChangeNotifier {
 
   /// 产物本地缓存（PPIO 链接会过期）；测试可不注入。
   final MediaCache? _mediaCache;
+  MediaCache? get mediaCache => _mediaCache;
   final Map<String, GenerationTask> _tasks = {};
   final Set<String> _polling = {}; // 防止同一任务起多个轮询循环
   final Set<String> _inFlight = {}; // 提交请求飞行中（本会话内），recover 跳过
@@ -122,6 +123,35 @@ class GenerationStore extends ChangeNotifier {
     await _storage.upsertGenerationTask(task);
     notifyListeners();
     unawaited(_submit(task));
+    return task;
+  }
+
+  /// 记录一个本地派生产物（编辑/剪辑/拼接结果），status 直接 succeeded。
+  Future<GenerationTask> addDerived({
+    required String conversationId,
+    required GenKind kind,
+    required String modelId, // local-edit / local-trim / local-concat
+    required String prompt,
+    required String localPath,
+    String? label,
+    String? parentTaskId,
+  }) async {
+    final task = GenerationTask(
+      id: newTaskId(),
+      conversationId: conversationId,
+      kind: kind,
+      modelId: modelId,
+      prompt: prompt,
+      params: {},
+      status: GenTaskStatus.succeeded,
+      resultUrls: [localPath],
+      localPaths: [localPath],
+      label: label,
+      parentTaskId: parentTaskId,
+    );
+    _tasks[task.id] = task;
+    await _storage.upsertGenerationTask(task);
+    notifyListeners();
     return task;
   }
 

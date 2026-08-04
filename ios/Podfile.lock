@@ -1,0 +1,46 @@
+PODS:
+  - Flutter (1.0.0)
+  - flutter_native_video_trimmer (1.0.0):
+    - Flutter
+  - get_thumbnail_video (0.0.1):
+    - Flutter
+    - libwebp
+  - libwebp (1.6.0):
+    - libwebp/demux (= 1.6.0)
+    - libwebp/mux (= 1.6.0)
+    - libwebp/sharpyuv (= 1.6.0)
+    - libwebp/webp (= 1.6.0)
+  - libwebp/demux (1.6.0):
+    - libwebp/webp
+  - libwebp/mux (1.6.0):
+    - libwebp/demux
+  - libwebp/sharpyuv (1.6.0)
+  - libwebp/webp (1.6.0):
+    - libwebp/sharpyuv
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - flutter_native_video_trimmer (from `.symlinks/plugins/flutter_native_video_trimmer/ios`)
+  - get_thumbnail_video (from `.symlinks/plugins/get_thumbnail_video/ios`)
+
+SPEC REPOS:
+  trunk:
+    - libwebp
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  flutter_native_video_trimmer:
+    :path: ".symlinks/plugins/flutter_native_video_trimmer/ios"
+  get_thumbnail_video:
+    :path: ".symlinks/plugins/get_thumbnail_video/ios"
+
+SPEC CHECKSUMS:
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_native_video_trimmer: 3a81cd49c8b789ed448a5d1606617633550496b5
+  get_thumbnail_video: b9a180957daed3e9179e66268db51d8798e41f65
+  libwebp: af5937a13536ef73f3784d69cc342b98961acf33
+
+PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+
+COCOAPODS: 1.15.2

@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pro_image_editor/pro_image_editor.dart';
 
 import '../models/conversation.dart';
 import '../models/generation_task.dart';
@@ -12,9 +15,11 @@ import '../state/request_log_store.dart';
 import '../theme.dart';
 import '../widgets/generation_bubble.dart';
 import '../widgets/prompt_card.dart';
+import '../services/video_native.dart';
 import 'gen_param_sheet.dart';
 import 'gen_tasks_screen.dart';
 import 'request_log_screen.dart';
+import 'video_trim_screen.dart';
 
 /// 聊天界面：消息气泡列表 + 底部输入栏。
 class ChatScreen extends StatefulWidget {
@@ -235,9 +240,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// 长按媒体气泡：引用（做参考图）/ 再生一张 / 复制提示词。
   Future<void> _onBubbleLongPress(
       Message message, GenerationTask task, Offset pos) async {
-    final canQuote = task.kind == GenKind.image &&
-        task.status == GenTaskStatus.succeeded &&
+    final succeeded = task.status == GenTaskStatus.succeeded &&
         task.resultUrls.isNotEmpty;
+    final canQuote = task.kind == GenKind.image && succeeded;
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox;
     final selected = await showMenu<String>(
@@ -247,6 +252,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       items: [
         if (canQuote)
           const PopupMenuItem(value: 'quote', child: Text('引用')),
+        if (task.kind == GenKind.image && succeeded)
+          const PopupMenuItem(value: 'edit', child: Text('编辑图片')),
+        if (task.kind == GenKind.video && succeeded)
+          const PopupMenuItem(value: 'trim', child: Text('剪辑视频')),
         const PopupMenuItem(value: 'regen', child: Text('再生一张')),
         const PopupMenuItem(value: 'prompt', child: Text('复制提示词')),
       ],
@@ -254,6 +263,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     if (selected == 'quote') {
       setState(() => _quoting = message);
+    } else if (selected == 'edit') {
+      await _editImage(task);
+    } else if (selected == 'trim') {
+      await _trimVideo(task);
     } else if (selected == 'regen') {
       final newTask = await widget.genStore.regenerate(task);
       await widget.store.appendLocalMessage(widget.conversation,
@@ -267,6 +280,149 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('已复制提示词'),
           duration: Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
+  /// 确保任务产物已在本地（未下载则先下载）。返回首个本地路径。
+  Future<String?> _ensureLocal(GenerationTask task) async {
+    if (task.localAt(0) != null) return task.localAt(0);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('正在下载素材…'),
+      duration: Duration(seconds: 1),
+      behavior: SnackBarBehavior.floating,
+    ));
+    await widget.genStore.downloadMedia(task);
+    final local = task.localAt(0);
+    if (local == null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('下载失败，源链接可能已过期'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+    return local;
+  }
+
+  /// 派生产物入库并回流为聊天气泡。
+  Future<void> _appendDerived({
+    required GenerationTask source,
+    required GenKind kind,
+    required String modelId,
+    required String localPath,
+    required String messageTag,
+  }) async {
+    final task = await widget.genStore.addDerived(
+      conversationId: widget.conversation.id,
+      kind: kind,
+      modelId: modelId,
+      prompt: source.prompt,
+      localPath: localPath,
+      label: source.label,
+      parentTaskId: source.id,
+    );
+    final tag = source.label != null ? '·${source.label}' : '';
+    await widget.store.appendLocalMessage(widget.conversation,
+        text: '[$messageTag$tag]', sender: Sender.agent, taskId: task.id);
+    _scrollToBottom();
+  }
+
+  /// 图片编辑（pro_image_editor）。
+  Future<void> _editImage(GenerationTask task) async {
+    final local = await _ensureLocal(task);
+    if (local == null || !mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ProImageEditor.file(
+        File(local),
+        callbacks: ProImageEditorCallbacks(
+          onImageEditingComplete: (bytes) async {
+            final path = await widget.genStore.mediaCache!.saveBytes(
+                bytes, 'edit-${DateTime.now().millisecondsSinceEpoch}', 'jpg');
+            await _appendDerived(
+              source: task,
+              kind: GenKind.image,
+              modelId: 'local-edit',
+              localPath: path,
+              messageTag: '图片编辑',
+            );
+            if (mounted) Navigator.of(context).pop();
+          },
+        ),
+      ),
+    ));
+  }
+
+  /// 视频修剪（video_trimmer）。
+  Future<void> _trimVideo(GenerationTask task) async {
+    final local = await _ensureLocal(task);
+    if (local == null || !mounted) return;
+    final out = await Navigator.of(context).push<String>(MaterialPageRoute(
+      builder: (_) => VideoTrimScreen(path: local),
+    ));
+    if (out == null || !mounted) return;
+    await _appendDerived(
+      source: task,
+      kind: GenKind.video,
+      modelId: 'local-trim',
+      localPath: out,
+      messageTag: '剪辑片段',
+    );
+  }
+
+  /// 多选的成功视频任务（按消息时间顺序），用于拼接。
+  /// 选中的消息必须全部是成功的视频生成，且 ≥2 段，否则返回空（按钮隐藏）。
+  List<GenerationTask> _selectedVideoTasks() {
+    final tasks = <GenerationTask>[];
+    for (final m in widget.conversation.messages) {
+      if (!_selectedIds.contains(m.id)) continue;
+      if (!m.isGeneration) return const [];
+      final t = m.taskId != null ? widget.genStore.byId(m.taskId!) : null;
+      if (t == null ||
+          t.kind != GenKind.video ||
+          t.status != GenTaskStatus.succeeded ||
+          t.resultUrls.isEmpty) {
+        return const [];
+      }
+      tasks.add(t);
+    }
+    return tasks.length >= 2 ? tasks : const [];
+  }
+
+  /// 拼接选中的多段视频（按聊天顺序）。
+  Future<void> _concatSelected() async {
+    final tasks = _selectedVideoTasks();
+    if (tasks.isEmpty) return;
+    _exitSelectMode();
+
+    // 逐段确保本地。
+    final paths = <String>[];
+    for (final t in tasks) {
+      final p = await _ensureLocal(t);
+      if (p == null) return;
+      paths.add(p);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('正在拼接 ${paths.length} 段视频…'),
+      duration: const Duration(seconds: 2),
+      behavior: SnackBarBehavior.floating,
+    ));
+    try {
+      final out = await widget.genStore.mediaCache!.outputPath(
+          'concat-${DateTime.now().millisecondsSinceEpoch}', 'mp4');
+      await VideoNative.concat(paths, out);
+      await _appendDerived(
+        source: tasks.first,
+        kind: GenKind.video,
+        modelId: 'local-concat',
+        localPath: out,
+        messageTag: '拼接成片×${paths.length}',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('拼接失败：$e'),
           behavior: SnackBarBehavior.floating,
         ));
       }
@@ -399,12 +555,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_selectMode)
             _SelectionBar(
               count: _selectedIds.length,
+              canConcat: _selectedVideoTasks().isNotEmpty,
               onSelectAll: () => setState(() {
                 _selectedIds
                   ..clear()
                   ..addAll(conv.messages.map((m) => m.id));
               }),
               onCopy: _copySelected,
+              onConcat: _concatSelected,
             )
           else ...[
             if (_quoting != null)
@@ -499,12 +657,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 /// 多选模式底部操作栏：全选 / 复制。
 class _SelectionBar extends StatelessWidget {
   final int count;
+  final bool canConcat;
   final VoidCallback onSelectAll;
   final VoidCallback onCopy;
+  final VoidCallback onConcat;
   const _SelectionBar({
     required this.count,
+    required this.canConcat,
     required this.onSelectAll,
     required this.onCopy,
+    required this.onConcat,
   });
 
   @override
@@ -523,6 +685,21 @@ class _SelectionBar extends StatelessWidget {
               style: TextStyle(fontSize: 15, color: Color(0xFF2E7CF6))),
         ),
         const Spacer(),
+        if (canConcat) ...[
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF7C4DFF),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: const Icon(Icons.movie_filter_outlined, size: 16),
+            label: const Text('拼接', style: TextStyle(fontSize: 14)),
+            onPressed: onConcat,
+          ),
+          const SizedBox(width: 10),
+        ],
         FilledButton.icon(
           style: FilledButton.styleFrom(
             backgroundColor: count > 0 ? WeColors.green : const Color(0xFFC8C8C8),

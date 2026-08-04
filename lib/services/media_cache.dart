@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -38,6 +39,20 @@ class MediaCache {
       AppLog.w('media', '下载异常 $stem：$e');
       return null;
     }
+  }
+
+  /// 把编辑/剪辑产物字节存进媒体目录，返回路径。
+  Future<String> saveBytes(Uint8List bytes, String stem, String ext) async {
+    final dir = await _mediaDir();
+    final file = File('${dir.path}/$stem.$ext');
+    await file.writeAsBytes(bytes, flush: true);
+    return file.path;
+  }
+
+  /// 生成媒体目录下的输出文件路径（拼接/剪辑导出用）。
+  Future<String> outputPath(String stem, String ext) async {
+    final dir = await _mediaDir();
+    return '${dir.path}/$stem.$ext';
   }
 
   static String _extOf(String url, String? contentType) {

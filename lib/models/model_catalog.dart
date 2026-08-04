@@ -341,6 +341,18 @@ class ModelCatalog {
 
   static ModelSpec defaultOf(GenKind kind) => modelsOf(kind).first;
 
+  /// 展示名：目录模型用名称，本地派生产物用友好名。
+  static String displayNameOf(String modelId) {
+    final m = byId(modelId);
+    if (m != null) return m.name;
+    return switch (modelId) {
+      'local-edit' => '本地编辑',
+      'local-trim' => '剪辑片段',
+      'local-concat' => '拼接成片',
+      _ => modelId,
+    };
+  }
+
   /// 给定模型，返回其全部参数默认值。
   static Map<ParamKey, String> defaultsFor(ModelSpec model) {
     final out = <ParamKey, String>{};
