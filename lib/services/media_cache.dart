@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:get_thumbnail_video/index.dart';
+import 'package:get_thumbnail_video/video_thumbnail.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
@@ -18,6 +20,41 @@ class MediaCache {
     final dir = Directory('${docs.path}/media');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
+  }
+
+  /// 视频封面单独存一个「封面文件夹」，便于管理空间、和正片分开。
+  Future<Directory> _coverDir() async {
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory('${docs.path}/covers');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// 取视频第一帧做封面，存 `covers/<stem>.jpg`。
+  /// [videoSource] 可以是本地文件路径，也可以是（尚未过期的）远端 URL。
+  /// 成功返回封面绝对路径，失败返回 null。
+  Future<String?> generateCover(String videoSource, String stem) async {
+    try {
+      final dir = await _coverDir();
+      final out = '${dir.path}/$stem.jpg';
+      if (File(out).existsSync()) return out;
+      final x = await VideoThumbnail.thumbnailFile(
+        video: videoSource,
+        thumbnailPath: dir.path,
+        imageFormat: ImageFormat.JPEG,
+        maxHeight: 1080,
+        quality: 80,
+      );
+      final f = File(x.path);
+      if (await f.exists()) {
+        if (x.path != out) await f.rename(out);
+        AppLog.i('media', '已生成封面 $stem.jpg');
+        return out;
+      }
+    } catch (e) {
+      AppLog.w('media', '生成封面失败 $stem：$e');
+    }
+    return null;
   }
 
   /// 下载 [url] 存为 `<stem>.<ext>`；成功返回本地绝对路径，失败返回 null。

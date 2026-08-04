@@ -56,6 +56,8 @@ dependencies:
 
   # 可跳到任意 index 的列表（引用条精确定位到尚未渲染的消息）。
   scrollable_positioned_list: ^0.3.8
+  get_thumbnail_video: ^0.7.3
+  photo_view: ^0.15.0
 
 dev_dependencies:
   flutter_test:

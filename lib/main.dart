@@ -24,6 +24,8 @@ Future<void> main() async {
   final docs = await getApplicationDocumentsDirectory();
   MediaPaths.mediaDir = '${docs.path}/media';
   await Directory(MediaPaths.mediaDir!).create(recursive: true);
+  MediaPaths.coversDir = '${docs.path}/covers';
+  await Directory(MediaPaths.coversDir!).create(recursive: true);
 
   // 打开本地数据库并加载历史数据。
   final storage = await SqliteChatStorage.open();

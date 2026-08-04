@@ -22,7 +22,7 @@ class SqliteChatStorage implements ChatStorage {
     final path = p.join(await getDatabasesPath(), 'carry_me.db');
     final db = await openDatabase(
       path,
-      version: 12,
+      version: 13,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -109,6 +109,11 @@ class SqliteChatStorage implements ChatStorage {
           await db.execute('ALTER TABLE messages ADD COLUMN label TEXT');
           await db.execute(
               "ALTER TABLE generation_tasks ADD COLUMN refs TEXT NOT NULL DEFAULT '[]'");
+        }
+        // v12 → v13：视频第一帧封面路径。
+        if (oldVersion < 13) {
+          await db.execute(
+              'ALTER TABLE generation_tasks ADD COLUMN cover_path TEXT');
         }
       },
     );
@@ -313,6 +318,7 @@ class SqliteChatStorage implements ChatStorage {
         parent_task_id  TEXT,
         refs            TEXT NOT NULL DEFAULT '[]',
         result_urls     TEXT    NOT NULL,
+        cover_path      TEXT,
         error           TEXT,
         created_at      INTEGER NOT NULL,
         updated_at      INTEGER NOT NULL
@@ -342,6 +348,7 @@ class SqliteChatStorage implements ChatStorage {
               parentTaskId: r['parent_task_id'] as String?,
               references: GenRef.decode((r['refs'] as String?) ?? '[]'),
               resultUrls: GenerationTask.decodeUrls(r['result_urls'] as String),
+              coverPath: r['cover_path'] as String?,
               error: r['error'] as String?,
               createdAt:
                   DateTime.fromMillisecondsSinceEpoch(r['created_at'] as int),
@@ -370,6 +377,7 @@ class SqliteChatStorage implements ChatStorage {
       'parent_task_id': task.parentTaskId,
       'refs': task.referencesJson,
         'result_urls': task.resultUrlsJson,
+        'cover_path': task.coverPath,
         'error': task.error,
         'created_at': task.createdAt.millisecondsSinceEpoch,
         'updated_at': task.updatedAt.millisecondsSinceEpoch,

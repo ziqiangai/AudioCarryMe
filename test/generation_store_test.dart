@@ -6,9 +6,20 @@ import 'package:http/testing.dart';
 
 import 'package:carry_me/models/generation_task.dart';
 import 'package:carry_me/models/model_catalog.dart';
+import 'package:carry_me/services/media_cache.dart';
 import 'package:carry_me/services/ppio_service.dart';
 import 'package:carry_me/state/generation_store.dart';
 import 'package:carry_me/storage/chat_storage.dart';
+
+/// 假封面生成：不碰原生插件，直接返回一个约定路径。
+class FakeMediaCache extends MediaCache {
+  int coverCalls = 0;
+  @override
+  Future<String?> generateCover(String videoSource, String stem) async {
+    coverCalls++;
+    return '/covers/$stem.jpg';
+  }
+}
 
 /// 记录 upsert 的内存 storage，兼作断言。
 class RecordingStorage extends NoopChatStorage {
@@ -85,6 +96,35 @@ void main() {
     expect(seq.first, endsWith('submitting'));
     expect(seq, contains('${t.id}:queued'));
     expect(seq.last, endsWith('succeeded'));
+  });
+
+  test('视频成功后自动生成第一帧封面并落库', () async {
+    final storage = RecordingStorage();
+    var polls = 0;
+    final ppio = PpioService(client: MockClient((req) async {
+      if (req.method == 'POST') return _json({'task_id': 'r1'});
+      polls++;
+      return _json({
+        'task': {'status': 'TASK_STATUS_SUCCEED'},
+        'videos': [{'video_url': 'https://x/v.mp4'}],
+      });
+    }));
+    final cache = FakeMediaCache();
+    final store = GenerationStore(ppio, storage,
+        pollInterval: const Duration(milliseconds: 5), mediaCache: cache);
+
+    final t = await store.start(
+      conversationId: 'c1',
+      kind: GenKind.video,
+      modelId: 'kling-v3.0-std',
+      prompt: 'sea',
+      params: {'duration': '5'},
+    );
+    await pump(200);
+    expect(t.status, GenTaskStatus.succeeded);
+    expect(cache.coverCalls, 1);
+    expect(t.coverPath, '/covers/${t.id}_cover.jpg');
+    expect(polls, greaterThan(0));
   });
 
   test('提交失败 → failed 带错误', () async {

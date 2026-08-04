@@ -54,6 +54,9 @@ class GenerationTask {
   /// 结果的本地缓存路径，与 resultUrls 按下标对齐（下载失败位为空串）。
   List<String> localPaths;
 
+  /// 视频第一帧封面路径（存「封面文件夹」），仅视频任务有。
+  String? coverPath;
+
   String? error;
   final DateTime createdAt;
   DateTime updatedAt;
@@ -73,6 +76,7 @@ class GenerationTask {
     List<GenRef>? references,
     List<String>? resultUrls,
     List<String>? localPaths,
+    this.coverPath,
     this.error,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -91,6 +95,10 @@ class GenerationTask {
   String? localAt(int i) => (i < localPaths.length)
       ? MediaPaths.resolve(localPaths[i])
       : null;
+
+  /// 封面的当前可用本地路径（按文件名解析；无则 null）。
+  String? get coverLocal =>
+      coverPath == null ? null : MediaPaths.resolve(coverPath!);
 
   static Map<String, String> decodeParams(String json) =>
       (jsonDecode(json) as Map<String, dynamic>)

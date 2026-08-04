@@ -84,6 +84,12 @@ class GenerationStore extends ChangeNotifier {
   /// 对非终态任务恢复轮询（App 回前台也调用）。
   Future<void> recover() async {
     for (final t in _tasks.values) {
+      // 补齐历史成功视频缺失的封面（如老数据、上次生成中断）。
+      if (t.kind == GenKind.video &&
+          t.status == GenTaskStatus.succeeded &&
+          t.coverLocal == null) {
+        unawaited(_ensureCover(t));
+      }
       if (!t.status.needsRecovery ||
           _polling.contains(t.id) ||
           _inFlight.contains(t.id)) {
@@ -242,6 +248,7 @@ class GenerationStore extends ChangeNotifier {
               t.resultUrls = r.urls;
             });
             AppLog.i('gen', '任务 ${task.id} 完成，${r.urls.length} 个产物');
+            unawaited(_ensureCover(task));
             return;
           case PpioPollStatus.failed:
             await _update(task, (t) {
@@ -299,11 +306,33 @@ class GenerationStore extends ChangeNotifier {
       }
       if (changed) {
         await _update(task, (t) => t.localPaths = paths);
+        // 视频下好后用本地文件重取封面（比远端更稳，且链接可能将过期）。
+        if (task.kind == GenKind.video && task.coverLocal == null) {
+          unawaited(_ensureCover(task));
+        }
       }
       return isFullyCached(task);
     } finally {
       _downloading.remove(task.id);
       notifyListeners();
+    }
+  }
+
+  /// 为成功的视频任务生成第一帧封面（存「封面文件夹」）。已有可用封面则跳过。
+  /// 优先用已下载的本地视频，否则用尚未过期的远端 URL。
+  Future<void> _ensureCover(GenerationTask task) async {
+    final cache = _mediaCache;
+    if (cache == null ||
+        task.kind != GenKind.video ||
+        task.status != GenTaskStatus.succeeded ||
+        task.resultUrls.isEmpty ||
+        task.coverLocal != null) {
+      return;
+    }
+    final src = task.localAt(0) ?? task.resultUrls.first;
+    final cover = await cache.generateCover(src, '${task.id}_cover');
+    if (cover != null) {
+      await _update(task, (t) => t.coverPath = cover);
     }
   }
 

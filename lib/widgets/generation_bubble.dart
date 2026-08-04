@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../models/gen_ref.dart';
 import '../models/generation_task.dart';
 import '../models/model_catalog.dart';
+import '../screens/media_gallery_screen.dart';
 import '../screens/video_player_screen.dart';
 import '../state/generation_store.dart';
 import '../theme.dart';
@@ -308,7 +309,9 @@ class _ResultView extends StatelessWidget {
           else
             _InlineVideo(
                 source: task.localAt(0) ?? task.resultUrls.first,
-                aspect: _aspectOf(task)),
+                aspect: _aspectOf(task),
+                cover: task.coverLocal,
+                onTap: () => _openGallery(context, 0)),
           const SizedBox(height: 6),
           Row(
             children: [
@@ -382,8 +385,7 @@ class _ResultView extends StatelessWidget {
       for (var i = 0; i < task.resultUrls.length; i++) ...[
         if (i > 0) const SizedBox(height: 6),
         GestureDetector(
-          onTap: () =>
-              _openViewer(context, task.localAt(i) ?? task.resultUrls[i]),
+          onTap: () => _openGallery(context, i),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: _taskImage(
@@ -430,36 +432,30 @@ class _ResultView extends StatelessWidget {
     return AspectRatio(aspectRatio: _aspectOf(task), child: inner);
   }
 
-  void _openViewer(BuildContext context, String source) {
+  /// 打开微信式画廊：汇集本会话内所有成功产物，定位到当前项，
+  /// 左右滑切换、上下滑退出。
+  void _openGallery(BuildContext context, int mediaIndex) {
+    final tasks = store.forConversation(task.conversationId).reversed;
+    final items = <GalleryMedia>[];
+    var start = 0;
+    for (final t in tasks) {
+      if (t.status != GenTaskStatus.succeeded || t.resultUrls.isEmpty) continue;
+      for (var i = 0; i < t.resultUrls.length; i++) {
+        if (t.id == task.id && i == mediaIndex) start = items.length;
+        items.add(GalleryMedia(
+          isVideo: t.kind == GenKind.video,
+          source: t.localAt(i) ?? t.resultUrls[i],
+          cover: t.coverLocal,
+        ));
+      }
+    }
+    if (items.isEmpty) return;
     Navigator.of(context).push(PageRouteBuilder(
       opaque: false,
-      barrierColor: Colors.black87,
-      pageBuilder: (_, _, _) => _ImageViewer(source: source),
+      barrierColor: Colors.transparent,
+      pageBuilder: (_, _, _) =>
+          MediaGalleryScreen(items: items, initialIndex: start),
     ));
-  }
-}
-
-/// 全屏图片查看（捏合缩放，点按关闭）。
-class _ImageViewer extends StatelessWidget {
-  final String source; // 本地路径或 URL
-  const _ImageViewer({required this.source});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.of(context).pop(),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: Center(
-          child: InteractiveViewer(
-            maxScale: 5,
-            child: source.startsWith('/')
-                ? Image.file(File(source))
-                : Image.network(source),
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -469,14 +465,18 @@ class _ImageViewer extends StatelessWidget {
 class _InlineVideo extends StatelessWidget {
   final String source; // 本地路径或 URL
   final double aspect;
-  const _InlineVideo({required this.source, required this.aspect});
+  final String? cover; // 第一帧封面本地路径
+  final VoidCallback? onTap;
+  const _InlineVideo(
+      {required this.source, required this.aspect, this.cover, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => VideoPlayerScreen(url: source),
-      )),
+      onTap: onTap ??
+          () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => VideoPlayerScreen(url: source),
+              )),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: AspectRatio(
@@ -486,6 +486,10 @@ class _InlineVideo extends StatelessWidget {
             child: Stack(
               alignment: Alignment.center,
               children: [
+                if (cover != null)
+                  Positioned.fill(
+                    child: Image.file(File(cover!), fit: BoxFit.cover),
+                  ),
                 Container(
                   width: 52,
                   height: 52,
