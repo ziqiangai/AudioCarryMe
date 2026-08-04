@@ -45,6 +45,54 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// 引用图片消息后暂存的参考图 URL：下一次工具调用会作为参考图（图生图/图生视频）。
   String? _pendingRefUrl;
 
+  /// 多选复制模式（微信式勾选聊天记录）。
+  bool _selectMode = false;
+  final Set<String> _selectedIds = {};
+
+  void _exitSelectMode() => setState(() {
+        _selectMode = false;
+        _selectedIds.clear();
+      });
+
+  /// 把一条消息格式化成可分析的文本行。
+  String _formatMessage(Message m) {
+    final who = m.isMine ? '我' : '助手';
+    String body;
+    if (m.isGeneration) {
+      final task = widget.genStore.byId(m.taskId!);
+      body = task == null
+          ? m.text
+          : '[${task.kind == GenKind.image ? '图片' : '视频'}生成·${task.modelId}] ${task.prompt}';
+    } else if (m.isPromptCard) {
+      body = '[提示词卡片] ${m.text}';
+    } else if (m.isError) {
+      body = '[错误] ${m.text}';
+    } else {
+      body = m.text;
+    }
+    if (m.hasQuote) {
+      body = '(引用 ${m.quotedAuthor}：${m.quotedText}) $body';
+    }
+    return '$who: $body';
+  }
+
+  Future<void> _copySelected() async {
+    final msgs = widget.conversation.messages
+        .where((m) => _selectedIds.contains(m.id))
+        .toList();
+    if (msgs.isEmpty) return;
+    final text = msgs.map(_formatMessage).join('\n');
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('已复制 ${msgs.length} 条聊天记录'),
+        duration: const Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+    _exitSelectMode();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -210,12 +258,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final conv = widget.conversation;
     return Scaffold(
       backgroundColor: WeColors.bg,
-      appBar: AppBar(
-        title: Text(conv.name),
-        actions: [
-          _TopMenu(logStore: widget.logStore, genStore: widget.genStore)
-        ],
-      ),
+      appBar: _selectMode
+          ? AppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _exitSelectMode,
+              ),
+              title: Text('已选 ${_selectedIds.length} 条'),
+            )
+          : AppBar(
+              title: Text(conv.name),
+              actions: [
+                _TopMenu(
+                  logStore: widget.logStore,
+                  genStore: widget.genStore,
+                  onCopyChat: () => setState(() => _selectMode = true),
+                )
+              ],
+            ),
       body: Column(
         children: [
           Expanded(
@@ -238,6 +298,67 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     final mi =
                         msgs.length - 1 - (conv.agentTyping ? i - 1 : i);
                     final msg = msgs[mi];
+                    // 多选模式：左侧复选圈，点击任意处切换勾选。
+                    if (_selectMode) {
+                      final checked = _selectedIds.contains(msg.id);
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => setState(() => checked
+                            ? _selectedIds.remove(msg.id)
+                            : _selectedIds.add(msg.id)),
+                        child: Row(children: [
+                          Padding(
+                            padding: const EdgeInsets.only(left: 10),
+                            child: Icon(
+                              checked
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              size: 22,
+                              color: checked
+                                  ? WeColors.green
+                                  : const Color(0xFFBBBBBB),
+                            ),
+                          ),
+                          Expanded(
+                              child: AbsorbPointer(
+                                  child: _buildMessageItem(conv, msg, mi,
+                                      msgs.length))),
+                        ]),
+                      );
+                    }
+                    return _buildMessageItem(conv, msg, mi, msgs.length);
+                  },
+                );
+              },
+            ),
+          ),
+          if (_selectMode)
+            _SelectionBar(
+              count: _selectedIds.length,
+              onSelectAll: () => setState(() {
+                _selectedIds
+                  ..clear()
+                  ..addAll(conv.messages.map((m) => m.id));
+              }),
+              onCopy: _copySelected,
+            )
+          else ...[
+            if (_quoting != null)
+              _QuoteBar(
+                message: _quoting!,
+                peerName: conv.name,
+                onCancel: () => setState(() => _quoting = null),
+              ),
+            _InputBar(controller: _input, canSend: _canSend, onSend: _send),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 单条消息渲染（原 itemBuilder 主体，供普通/多选两种模式复用）。
+  Widget _buildMessageItem(
+      Conversation conv, Message msg, int mi, int total) {
                     // 提示词卡片。
                     if (msg.isPromptCard) {
                       return Padding(
@@ -299,30 +420,58 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       );
                     }
-                    final isLast = mi == msgs.length - 1;
-                    final showCursor =
-                        conv.streaming && isLast && !msg.isMine;
-                    return _MessageBubble(
-                      message: msg,
-                      peerName: conv.name,
-                      showCursor: showCursor,
-                      onQuote: () => setState(() => _quoting = msg),
-                      onDelete: () => widget.store.deleteMessage(conv, msg),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-          if (_quoting != null)
-            _QuoteBar(
-              message: _quoting!,
-              peerName: conv.name,
-              onCancel: () => setState(() => _quoting = null),
-            ),
-          _InputBar(controller: _input, canSend: _canSend, onSend: _send),
-        ],
+    final isLast = mi == total - 1;
+    final showCursor = conv.streaming && isLast && !msg.isMine;
+    return _MessageBubble(
+      message: msg,
+      peerName: conv.name,
+      showCursor: showCursor,
+      onQuote: () => setState(() => _quoting = msg),
+      onDelete: () => widget.store.deleteMessage(conv, msg),
+    );
+  }
+}
+
+/// 多选模式底部操作栏：全选 / 复制。
+class _SelectionBar extends StatelessWidget {
+  final int count;
+  final VoidCallback onSelectAll;
+  final VoidCallback onCopy;
+  const _SelectionBar({
+    required this.count,
+    required this.onSelectAll,
+    required this.onCopy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: WeColors.barBg,
+        border: Border(top: BorderSide(color: WeColors.divider, width: 0.5)),
       ),
+      padding: EdgeInsets.fromLTRB(
+          16, 10, 16, 10 + MediaQuery.of(context).padding.bottom),
+      child: Row(children: [
+        GestureDetector(
+          onTap: onSelectAll,
+          child: const Text('全选',
+              style: TextStyle(fontSize: 15, color: Color(0xFF2E7CF6))),
+        ),
+        const Spacer(),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: count > 0 ? WeColors.green : const Color(0xFFC8C8C8),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          icon: const Icon(Icons.copy_rounded, size: 16),
+          label: Text('复制${count > 0 ? '（$count）' : ''}',
+              style: const TextStyle(fontSize: 14)),
+          onPressed: count > 0 ? onCopy : null,
+        ),
+      ]),
     );
   }
 }
@@ -331,7 +480,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 class _TopMenu extends StatelessWidget {
   final RequestLogStore logStore;
   final GenerationStore genStore;
-  const _TopMenu({required this.logStore, required this.genStore});
+  final VoidCallback onCopyChat;
+  const _TopMenu({
+    required this.logStore,
+    required this.genStore,
+    required this.onCopyChat,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -350,9 +504,12 @@ class _TopMenu extends StatelessWidget {
           Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => GenTasksScreen(store: genStore),
           ));
+        } else if (v == 'copy') {
+          onCopyChat();
         }
       },
       itemBuilder: (_) => [
+        _menuItem('copy', Icons.checklist_rounded, '复制聊天记录'),
         _menuItem('gens', Icons.auto_awesome, '生成任务'),
         _menuItem('logs', Icons.query_stats, '大模型请求记录'),
       ],
