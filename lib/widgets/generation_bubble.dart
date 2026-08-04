@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:video_player/video_player.dart';
 
 import '../models/gen_ref.dart';
 import '../models/generation_task.dart';
@@ -45,7 +44,7 @@ class GenerationBubble extends StatelessWidget {
             GenTaskStatus.succeeded =>
               _ResultView(task: task, store: store, onRefTap: onRefTap),
             GenTaskStatus.failed => _ErrorView(task: task, store: store),
-            _ => _SkeletonView(task: task, onRefTap: onRefTap),
+            _ => _SkeletonView(task: task, store: store, onRefTap: onRefTap),
           },
         );
       },
@@ -142,6 +141,27 @@ class _Card extends StatelessWidget {
   }
 }
 
+/// 引用条数据：优先 references；旧数据兜底用 parentTaskId 构造一条参考图引用。
+List<GenRef> _effectiveRefs(GenerationTask task, GenerationStore store) {
+  if (task.references.isNotEmpty) return task.references;
+  final pid = task.parentTaskId;
+  if (pid != null && pid.isNotEmpty) {
+    final parent = store.byId(pid);
+    return [
+      GenRef(
+        kind: GenRefKind.referenceImage,
+        targetId: pid,
+        targetIsTask: true,
+        snapshotImage: parent?.localAt(0) ??
+            (parent != null && parent.resultUrls.isNotEmpty
+                ? parent.resultUrls.first
+                : null),
+      ),
+    ];
+  }
+  return const [];
+}
+
 double _aspectOf(GenerationTask task) {
   final ar = task.params['aspectRatio'];
   return switch (ar) {
@@ -156,8 +176,10 @@ double _aspectOf(GenerationTask task) {
 
 class _SkeletonView extends StatefulWidget {
   final GenerationTask task;
+  final GenerationStore store;
   final void Function(GenRef ref)? onRefTap;
-  const _SkeletonView({required this.task, this.onRefTap});
+  const _SkeletonView(
+      {required this.task, required this.store, this.onRefTap});
 
   @override
   State<_SkeletonView> createState() => _SkeletonViewState();
@@ -189,7 +211,9 @@ class _SkeletonViewState extends State<_SkeletonView>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          RefBlock(refs: widget.task.references, onTap: widget.onRefTap),
+          RefBlock(
+              refs: _effectiveRefs(widget.task, widget.store),
+              onTap: widget.onRefTap),
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: AspectRatio(
@@ -278,7 +302,7 @@ class _ResultView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          RefBlock(refs: task.references, onTap: onRefTap),
+          RefBlock(refs: _effectiveRefs(task, store), onTap: onRefTap),
           if (task.kind == GenKind.image)
             ..._imageViews(context)
           else
@@ -447,89 +471,49 @@ class _ImageViewer extends StatelessWidget {
 }
 
 /// 聊天内联视频：首帧 + 播放按钮，点击播放/暂停。
-class _InlineVideo extends StatefulWidget {
+/// 内联视频：静态占位卡（不初始化播放器，避免列表里多路解码卡顿），
+/// 点击进全屏播放页才真正加载。
+class _InlineVideo extends StatelessWidget {
   final String source; // 本地路径或 URL
   final double aspect;
   const _InlineVideo({required this.source, required this.aspect});
 
   @override
-  State<_InlineVideo> createState() => _InlineVideoState();
-}
-
-class _InlineVideoState extends State<_InlineVideo> {
-  VideoPlayerController? _ctl;
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    final ctl = widget.source.startsWith('/')
-        ? VideoPlayerController.file(File(widget.source))
-        : VideoPlayerController.networkUrl(Uri.parse(widget.source));
-    _ctl = ctl;
-    ctl.initialize().then((_) {
-      if (mounted) setState(() => _ready = true);
-      ctl.setLooping(true);
-    }).catchError((_) {});
-  }
-
-  @override
-  void dispose() {
-    _ctl?.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final ctl = _ctl;
-    if (ctl == null || !_ready) {
-      return AspectRatio(
-        aspectRatio: widget.aspect,
-        child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A1A1A),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Center(
-            child: SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white54),
-            ),
-          ),
-        ),
-      );
-    }
-    // 点击 → 全屏播放（内联只做首帧预览）。
     return GestureDetector(
-      onTap: () {
-        ctl.pause();
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => VideoPlayerScreen(url: widget.source),
-        ));
-      },
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => VideoPlayerScreen(url: source),
+      )),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            AspectRatio(
-              aspectRatio: ctl.value.aspectRatio > 0
-                  ? ctl.value.aspectRatio
-                  : widget.aspect,
-              child: VideoPlayer(ctl),
+        child: AspectRatio(
+          aspectRatio: aspect,
+          child: ColoredBox(
+            color: const Color(0xFF1A1A1A),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: const BoxDecoration(
+                      color: Colors.black38, shape: BoxShape.circle),
+                  child: const Icon(Icons.play_arrow,
+                      color: Colors.white, size: 34),
+                ),
+                const Positioned(
+                  right: 8,
+                  bottom: 6,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.movie_outlined, size: 13, color: Colors.white70),
+                    SizedBox(width: 3),
+                    Text('视频',
+                        style: TextStyle(fontSize: 11, color: Colors.white70)),
+                  ]),
+                ),
+              ],
             ),
-            Container(
-              width: 46,
-              height: 46,
-              decoration: const BoxDecoration(
-                color: Colors.black45,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.play_arrow, color: Colors.white, size: 30),
-            ),
-          ],
+          ),
         ),
       ),
     );

@@ -93,10 +93,16 @@ class PpioService {
     return PpioSubmitResult.async(taskId, traceId: trace);
   }
 
-  /// Seedance 提交：POST /contents/generations/tasks → { id }。
+  /// Seedance 提交：图生视频先把参考图建成素材（asset://），再提交生成任务。
   Future<PpioSubmitResult> _submitSeedance(GenerationTask task) async {
-    final body = buildSeedanceBody(task);
-    AppLog.i('ppio', '提交 ${task.modelId}（Ark）');
+    String? imageRef = task.params['imageUrl'];
+    if (imageRef != null && imageRef.isNotEmpty) {
+      final assetId = await _ensureImageAsset(imageRef);
+      imageRef = 'asset://$assetId';
+      AppLog.i('ppio', 'Seedance 参考图素材就绪 $imageRef');
+    }
+    final body = buildSeedanceBody(task, imageRef: imageRef);
+    AppLog.i('ppio', '提交 ${task.modelId}（Ark metered）');
     final resp = await _client.post(
       Uri.parse(
           '${PpioConfig.bytedanceBaseUrl}/contents/generations/tasks'),
@@ -198,20 +204,67 @@ class PpioService {
     }
   }
 
+  /// 创建图片素材并轮询到 Active，返回平台 asset id。
+  /// 让 PPIO/上游从公网下载注册，避免直传签名 URL 上游拉不到导致的失败。
+  Future<String> _ensureImageAsset(String url) async {
+    final createResp = await _client.post(
+      Uri.parse(
+          '${PpioConfig.bytedanceAssetUrl}?Action=CreateAsset&Version=2024-01-01'),
+      headers: _headers,
+      body: jsonEncode({'URL': url, 'AssetType': 'Image', 'Name': 'carryme-ref'}),
+    );
+    final trace = createResp.headers['x-trace-id'];
+    final data = jsonDecode(utf8.decode(createResp.bodyBytes))
+        as Map<String, dynamic>;
+    final result = data['Result'] as Map<String, dynamic>?;
+    final id = result?['Id'] as String?;
+    if (id == null || id.isEmpty) {
+      final err = (data['ResponseMetadata'] as Map?)?['Error'];
+      throw PpioException('创建参考图素材失败：${err ?? data}', traceId: trace);
+    }
+    var status = result?['Status'] as String?;
+    for (var i = 0; i < 60 && status != 'Active'; i++) {
+      if (status == 'Failed') {
+        throw PpioException('参考图素材处理失败', traceId: trace);
+      }
+      await Future.delayed(const Duration(seconds: 2));
+      status = await _getAssetStatus(id);
+    }
+    if (status != 'Active') {
+      throw PpioException('参考图素材处理超时', traceId: trace);
+    }
+    return id;
+  }
+
+  Future<String?> _getAssetStatus(String id) async {
+    final resp = await _client.post(
+      Uri.parse(
+          '${PpioConfig.bytedanceAssetUrl}?Action=GetAsset&Version=2024-01-01'),
+      headers: _headers,
+      body: jsonEncode({'Id': id}),
+    );
+    if (resp.statusCode != 200) return 'Processing'; // 暂时性错误，继续轮询
+    final data = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+    return (data['Result'] as Map<String, dynamic>?)?['Status'] as String?;
+  }
+
   // ---------- 请求体构造（按模型族） ----------
 
   /// Seedance（Ark 协议）请求体：
   /// 根字段 model/resolution/ratio/duration/watermark + content 数组。
   /// i2v = content 里追加一个不带 role 的 image_url。
-  static Map<String, dynamic> buildSeedanceBody(GenerationTask task) {
+  /// [imageRef] 为最终图片引用（通常是 asset://id）；不传则用 params['imageUrl']。
+  static Map<String, dynamic> buildSeedanceBody(GenerationTask task,
+      {String? imageRef}) {
     final p = task.params;
-    final ref = p['imageUrl'];
+    final ref = imageRef ?? p['imageUrl'];
     final content = <Map<String, dynamic>>[
       {'type': 'text', 'text': task.prompt},
       if (ref != null)
         {
           'type': 'image_url',
           'image_url': {'url': ref},
+          'role': 'reference_image',
         },
     ];
     return {

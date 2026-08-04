@@ -9,8 +9,11 @@ class PpioConfig {
 
   static const String apiKey = Secrets.ppioKey;
 
-  /// Seedance 2.0 的 bytedance 代理（Ark 协议）——走 PPIO 国内域名，同一把 key。
-  static const String bytedanceBaseUrl = '$baseUrl/bytedance';
+  /// Seedance 2.0（Ark 协议，token 后付费 metered 路由）——PPIO 国内域名，同一把 key。
+  static const String bytedanceBaseUrl = '$baseUrl/bytedance/metered';
+
+  /// Seedance 素材（虚拟人像/参考图）Ark Action 端点。
+  static const String bytedanceAssetUrl = '$baseUrl/synthetic/bytedance/ark';
 
   /// 轮询间隔与上限（15 分钟兜底）。
   static const Duration pollInterval = Duration(seconds: 3);

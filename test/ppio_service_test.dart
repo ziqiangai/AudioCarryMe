@@ -150,7 +150,7 @@ void main() {
       final content = i2v['content'] as List;
       expect(content, hasLength(2));
       expect(content[1]['image_url']['url'], 'https://x/f.png');
-      expect(content[1].containsKey('role'), isFalse); // i2v 裸 image_url
+      expect(content[1]['role'], 'reference_image');
     });
 
     test('目录里的每个模型 buildRequest 都不抛异常（目录/服务一致性）', () {
@@ -212,7 +212,7 @@ void main() {
     test('提交走 PPIO 国内 bytedance、返回 {id} 并捕获 trace', () async {
       final svc = PpioService(client: MockClient((req) async {
         expect(req.url.host, 'api.ppio.com');
-        expect(req.url.path, endsWith('/contents/generations/tasks'));
+        expect(req.url.path, contains('/metered/'));
         final body = jsonDecode(req.body) as Map<String, dynamic>;
         expect(body['model'], startsWith('doubao-seedance'));
         return http.Response(jsonEncode({'id': 'ark-1'}), 200,
