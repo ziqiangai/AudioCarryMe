@@ -215,7 +215,7 @@ class _DownloadCard extends StatelessWidget {
         if (!cached) ...[
           const SizedBox(height: 4),
           Text(
-            '供应商源链接有效期约 1 小时，过期后未下载的内容将无法查看',
+            '供应商源链接有效期约 48 小时，过期后未下载的内容将无法查看',
             style: const TextStyle(fontSize: 11, color: Color(0xFFE8912A)),
           ),
         ],
@@ -371,8 +371,10 @@ class _TimelineCard extends StatelessWidget {
               ? '${elapsed.inSeconds} 秒'
               : '${elapsed.inMinutes} 分 ${elapsed.inSeconds % 60} 秒',
           false),
-      if (task.ppioTaskId != null) ('PPIO 任务', task.ppioTaskId!, true),
-      if (task.traceId != null) ('Trace ID', task.traceId!, true),
+      ('PPIO 任务', task.ppioTaskId ?? '—（本版本前的任务未记录）',
+          task.ppioTaskId != null),
+      ('Trace ID', task.traceId ?? '—（本版本前的任务未记录）',
+          task.traceId != null),
       if (task.error != null) ('错误', task.error!, true),
     ];
     return _card(

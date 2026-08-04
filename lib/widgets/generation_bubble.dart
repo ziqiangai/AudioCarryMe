@@ -175,12 +175,13 @@ class _SkeletonViewState extends State<_SkeletonView>
 
 // ---------- 成功结果 ----------
 
-/// 未下载媒体的过期提示（PPIO 官方缓存约 1 小时）。
+/// 未下载媒体的过期提示（PPIO 官方口径：源链接保留约 48 小时）。
 String _expiryHint(GenerationTask task) {
-  final deadline = task.updatedAt.add(const Duration(hours: 1));
+  final deadline = task.updatedAt.add(const Duration(hours: 48));
   final left = deadline.difference(DateTime.now());
   if (left.isNegative) return '源链接可能已过期，请尽快尝试下载';
-  return '源链接约 ${left.inMinutes + 1} 分钟后过期，建议下载保存';
+  if (left.inHours >= 1) return '源链接约 ${left.inHours} 小时后过期，建议下载保存';
+  return '源链接约 ${left.inMinutes + 1} 分钟后过期，尽快下载！';
 }
 
 class _ResultView extends StatelessWidget {
