@@ -5,6 +5,7 @@ import '../models/conversation.dart';
 import '../models/generation_task.dart';
 import '../models/log_entry.dart';
 import '../models/message.dart';
+import '../models/gen_ref.dart';
 import '../models/model_catalog.dart';
 import '../models/request_log.dart';
 import 'chat_storage.dart';
@@ -21,7 +22,7 @@ class SqliteChatStorage implements ChatStorage {
     final path = p.join(await getDatabasesPath(), 'carry_me.db');
     final db = await openDatabase(
       path,
-      version: 11,
+      version: 12,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await db.execute('''
@@ -42,6 +43,7 @@ class SqliteChatStorage implements ChatStorage {
             task_id         TEXT,
             is_prompt_card  INTEGER NOT NULL DEFAULT 0,
             is_error        INTEGER NOT NULL DEFAULT 0,
+            label           TEXT,
             FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
           )''');
         await db.execute(
@@ -102,6 +104,12 @@ class SqliteChatStorage implements ChatStorage {
           await db.execute(
               'ALTER TABLE request_logs ADD COLUMN conversation_id TEXT');
         }
+        // v11 → v12：引用体系（消息场景标签 + 任务引用列表）。
+        if (oldVersion < 12) {
+          await db.execute('ALTER TABLE messages ADD COLUMN label TEXT');
+          await db.execute(
+              "ALTER TABLE generation_tasks ADD COLUMN refs TEXT NOT NULL DEFAULT '[]'");
+        }
       },
     );
     return SqliteChatStorage._(db);
@@ -134,6 +142,7 @@ class SqliteChatStorage implements ChatStorage {
           taskId: m['task_id'] as String?,
           isPromptCard: (m['is_prompt_card'] as int? ?? 0) == 1,
           isError: (m['is_error'] as int? ?? 0) == 1,
+          label: m['label'] as String?,
         ));
       }
       conversations.add(conv);
@@ -169,6 +178,7 @@ class SqliteChatStorage implements ChatStorage {
         'task_id': message.taskId,
         'is_prompt_card': message.isPromptCard ? 1 : 0,
         'is_error': message.isError ? 1 : 0,
+        'label': message.label,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -301,6 +311,7 @@ class SqliteChatStorage implements ChatStorage {
         local_paths     TEXT    NOT NULL DEFAULT '[]',
         label           TEXT,
         parent_task_id  TEXT,
+        refs            TEXT NOT NULL DEFAULT '[]',
         result_urls     TEXT    NOT NULL,
         error           TEXT,
         created_at      INTEGER NOT NULL,
@@ -329,6 +340,7 @@ class SqliteChatStorage implements ChatStorage {
                   (r['local_paths'] as String?) ?? '[]'),
               label: r['label'] as String?,
               parentTaskId: r['parent_task_id'] as String?,
+              references: GenRef.decode((r['refs'] as String?) ?? '[]'),
               resultUrls: GenerationTask.decodeUrls(r['result_urls'] as String),
               error: r['error'] as String?,
               createdAt:
@@ -356,6 +368,7 @@ class SqliteChatStorage implements ChatStorage {
       'local_paths': task.localPathsJson,
       'label': task.label,
       'parent_task_id': task.parentTaskId,
+      'refs': task.referencesJson,
         'result_urls': task.resultUrlsJson,
         'error': task.error,
         'created_at': task.createdAt.millisecondsSinceEpoch,

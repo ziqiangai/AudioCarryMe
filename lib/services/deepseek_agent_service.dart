@@ -20,6 +20,11 @@ const List<Map<String, dynamic>> kCreationTools = [
       'type': 'object',
       'properties': {
         'prompt': {'type': 'string', 'description': '完整的提示词文案'},
+        'label': {
+          'type': 'string',
+          'description': '场景标签（如 场景1），批量时给每张卡片标注，'
+              '后续生图生视频用同名 label 关联成创作链'
+        },
       },
       'required': ['prompt'],
     },

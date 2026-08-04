@@ -30,6 +30,7 @@ class ChatStore extends ChangeNotifier {
     required Sender sender,
     String? taskId,
     bool isPromptCard = false,
+    String? label,
   }) async {
     if (!_conversations.contains(conversation)) {
       _conversations.add(conversation);
@@ -42,6 +43,7 @@ class ChatStore extends ChangeNotifier {
       time: DateTime.now(),
       taskId: taskId,
       isPromptCard: isPromptCard,
+      label: label,
     );
     conversation.messages.add(msg);
     await _storage.insertMessage(conversation.id, msg);

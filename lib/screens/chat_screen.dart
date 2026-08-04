@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:pro_image_editor/pro_image_editor.dart';
 
 import '../models/conversation.dart';
+import '../models/gen_ref.dart';
 import '../models/generation_task.dart';
 import '../models/message.dart';
 import '../models/model_catalog.dart';
@@ -54,6 +55,57 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// 多选复制模式（微信式勾选聊天记录）。
   bool _selectMode = false;
   final Set<String> _selectedIds = {};
+
+  /// 引用定位：被高亮的消息 id + 各消息的定位 key。
+  String? _highlightedMsgId;
+  final Map<String, GlobalKey> _msgKeys = {};
+
+  GlobalKey _keyFor(String id) => _msgKeys.putIfAbsent(id, GlobalKey.new);
+
+  /// 列表项统一包一层：提供定位 key + 引用高亮背景。
+  Widget _wrapMsg(String id, Widget child) => Container(
+        key: _keyFor(id),
+        color: _highlightedMsgId == id ? const Color(0x2242A5F5) : null,
+        child: child,
+      );
+
+  /// 点击引用条 → 定位到被引用的原消息（卡片或来源图任务）并高亮。
+  void _onRefTap(GenRef ref) {
+    String? targetMsgId;
+    if (ref.targetIsTask) {
+      for (final m in widget.conversation.messages) {
+        if (m.taskId == ref.targetId) {
+          targetMsgId = m.id;
+          break;
+        }
+      }
+    } else {
+      targetMsgId = ref.targetId; // 卡片消息 id
+    }
+    if (targetMsgId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('来源消息已不在当前会话'),
+        duration: Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    setState(() => _highlightedMsgId = targetMsgId);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _msgKeys[targetMsgId]?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(ctx,
+            duration: const Duration(milliseconds: 300),
+            alignment: 0.3,
+            curve: Curves.easeOut);
+      }
+    });
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted && _highlightedMsgId == targetMsgId) {
+        setState(() => _highlightedMsgId = null);
+      }
+    });
+  }
 
   void _exitSelectMode() => setState(() {
         _selectMode = false;
@@ -127,12 +179,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       Conversation conv, List<AgentToolCall> calls) async {
     if (!mounted || conv != widget.conversation) return;
 
-    // 1) 提示词卡片逐个产出。
+    // 1) 提示词卡片逐个产出（带场景 label，供后续生成解析引用 id）。
     for (final call in calls.where((c) => c.name == 'design_prompt')) {
+      final label = (call.input['label'] as String?)?.trim();
       await widget.store.appendLocalMessage(widget.conversation,
           text: (call.input['prompt'] as String?) ?? '',
           sender: Sender.agent,
-          isPromptCard: true);
+          isPromptCard: true,
+          label: (label?.isEmpty ?? true) ? null : label);
     }
     _scrollToBottom();
 
@@ -197,14 +251,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (isBatch && r.parent != null) {
         params['imageUrl'] = r.parent!.resultUrls.first;
       }
+      final finalPrompt = isBatch ? r.prompt : result.prompt;
       final task = await widget.genStore.start(
         conversationId: widget.conversation.id,
         kind: kind,
         modelId: result.modelId,
-        prompt: isBatch ? r.prompt : result.prompt,
+        prompt: finalPrompt,
         params: params,
         label: r.label,
         parentTaskId: r.parent?.id,
+        references: _buildRefs(
+            prompt: finalPrompt, label: r.label, parent: r.parent),
       );
       final tag = r.label != null ? '·${r.label}' : '';
       await widget.store.appendLocalMessage(widget.conversation,
@@ -213,6 +270,51 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           taskId: task.id);
     }
     _scrollToBottom();
+  }
+
+  /// 写入时解析引用为稳定 id：卡片（label 优先，prompt 文本兜底）+ 参考图任务。
+  List<GenRef> _buildRefs({
+    required String prompt,
+    String? label,
+    GenerationTask? parent,
+  }) {
+    final refs = <GenRef>[];
+    final card = _findPromptCard(label: label, prompt: prompt);
+    if (card != null) {
+      refs.add(GenRef(
+        kind: GenRefKind.promptCard,
+        targetId: card.id,
+        targetIsTask: false,
+        snapshotText: _firstLine(card.text),
+      ));
+    }
+    if (parent != null) {
+      refs.add(GenRef(
+        kind: GenRefKind.referenceImage,
+        targetId: parent.id,
+        targetIsTask: true,
+        snapshotImage: parent.localAt(0) ??
+            (parent.resultUrls.isNotEmpty ? parent.resultUrls.first : null),
+      ));
+    }
+    return refs;
+  }
+
+  /// 定位来源提示词卡片消息：优先同 label，否则 prompt 文本精确匹配；取最新一条。
+  Message? _findPromptCard({String? label, required String prompt}) {
+    Message? byLabel, byText;
+    final p = prompt.trim();
+    for (final m in widget.conversation.messages) {
+      if (!m.isPromptCard) continue;
+      if (label != null && label.isNotEmpty && m.label == label) byLabel = m;
+      if (m.text.trim() == p) byText = m;
+    }
+    return byLabel ?? byText;
+  }
+
+  static String _firstLine(String text) {
+    final line = text.trim().split('\n').first.trim();
+    return line.length > 40 ? '${line.substring(0, 40)}…' : line;
   }
 
   /// 提示词卡片一键生成：直接弹参数面板（prompt=卡片全文，不经 Agent）。
@@ -548,32 +650,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     // 多选模式：左侧复选圈，点击任意处切换勾选。
                     if (_selectMode) {
                       final checked = _selectedIds.contains(msg.id);
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => setState(() => checked
-                            ? _selectedIds.remove(msg.id)
-                            : _selectedIds.add(msg.id)),
-                        child: Row(children: [
-                          Padding(
-                            padding: const EdgeInsets.only(left: 10),
-                            child: Icon(
-                              checked
-                                  ? Icons.check_circle
-                                  : Icons.radio_button_unchecked,
-                              size: 22,
-                              color: checked
-                                  ? WeColors.green
-                                  : const Color(0xFFBBBBBB),
+                      return _wrapMsg(
+                        msg.id,
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => setState(() => checked
+                              ? _selectedIds.remove(msg.id)
+                              : _selectedIds.add(msg.id)),
+                          child: Row(children: [
+                            Padding(
+                              padding: const EdgeInsets.only(left: 10),
+                              child: Icon(
+                                checked
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                                size: 22,
+                                color: checked
+                                    ? WeColors.green
+                                    : const Color(0xFFBBBBBB),
+                              ),
                             ),
-                          ),
-                          Expanded(
-                              child: AbsorbPointer(
-                                  child: _buildMessageItem(conv, msg, mi,
-                                      msgs.length))),
-                        ]),
+                            Expanded(
+                                child: AbsorbPointer(
+                                    child: _buildMessageItem(conv, msg, mi,
+                                        msgs.length))),
+                          ]),
+                        ),
                       );
                     }
-                    return _buildMessageItem(conv, msg, mi, msgs.length);
+                    return _wrapMsg(
+                        msg.id, _buildMessageItem(conv, msg, mi, msgs.length));
                   },
                 );
               },
@@ -664,6 +770,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                               taskId: msg.taskId!,
                               onLongPress: (t, pos) =>
                                   _onBubbleLongPress(msg, t, pos),
+                              onRefTap: _onRefTap,
                             ),
                           ],
                         ),

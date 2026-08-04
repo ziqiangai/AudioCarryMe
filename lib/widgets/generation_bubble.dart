@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
+import '../models/gen_ref.dart';
 import '../models/generation_task.dart';
 import '../models/model_catalog.dart';
 import '../screens/video_player_screen.dart';
@@ -18,11 +19,15 @@ class GenerationBubble extends StatelessWidget {
   /// 长按回调（弹「再生一张」等菜单），由聊天页注入。
   final void Function(GenerationTask task, Offset globalPos)? onLongPress;
 
+  /// 点击引用条：定位到被引用的原消息/任务。
+  final void Function(GenRef ref)? onRefTap;
+
   const GenerationBubble({
     super.key,
     required this.store,
     required this.taskId,
     this.onLongPress,
+    this.onRefTap,
   });
 
   @override
@@ -37,13 +42,83 @@ class GenerationBubble extends StatelessWidget {
         return GestureDetector(
           onLongPressStart: (d) => onLongPress?.call(task, d.globalPosition),
           child: switch (task.status) {
-            GenTaskStatus.succeeded => _ResultView(task: task, store: store),
+            GenTaskStatus.succeeded =>
+              _ResultView(task: task, store: store, onRefTap: onRefTap),
             GenTaskStatus.failed => _ErrorView(task: task, store: store),
-            _ => _SkeletonView(task: task),
+            _ => _SkeletonView(task: task, onRefTap: onRefTap),
           },
         );
       },
     );
+  }
+}
+
+/// 微信式引用条：渲染任务的引用列表（1~N 条），点击定位来源。
+class RefBlock extends StatelessWidget {
+  final List<GenRef> refs;
+  final void Function(GenRef ref)? onTap;
+  const RefBlock({super.key, required this.refs, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    if (refs.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final r in refs)
+            InkWell(
+              onTap: onTap == null ? null : () => onTap!(r),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Row(children: [
+                  Container(width: 3, height: 26, color: const Color(0xFF9AA0FF)),
+                  const SizedBox(width: 8),
+                  if (r.snapshotImage != null)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: _snap(r.snapshotImage!),
+                    )
+                  else
+                    Icon(_iconOf(r.kind), size: 15, color: const Color(0xFF7A7FD6)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${r.kind.label}：${r.snapshotText ?? ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: Color(0xFF666666)),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right,
+                      size: 15, color: Color(0xFFBBBBBB)),
+                ]),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  static IconData _iconOf(GenRefKind k) => switch (k) {
+        GenRefKind.promptCard => Icons.edit_note_rounded,
+        _ => Icons.image_outlined,
+      };
+
+  static Widget _snap(String src) {
+    const w = 26.0;
+    if (src.startsWith('/')) {
+      return Image.file(File(src), width: w, height: w, fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => const SizedBox(width: w, height: w));
+    }
+    return Image.network(src, width: w, height: w, fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => const SizedBox(width: w, height: w));
   }
 }
 
@@ -81,7 +156,8 @@ double _aspectOf(GenerationTask task) {
 
 class _SkeletonView extends StatefulWidget {
   final GenerationTask task;
-  const _SkeletonView({required this.task});
+  final void Function(GenRef ref)? onRefTap;
+  const _SkeletonView({required this.task, this.onRefTap});
 
   @override
   State<_SkeletonView> createState() => _SkeletonViewState();
@@ -113,6 +189,7 @@ class _SkeletonViewState extends State<_SkeletonView>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          RefBlock(refs: widget.task.references, onTap: widget.onRefTap),
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: AspectRatio(
@@ -189,7 +266,8 @@ String _expiryHint(GenerationTask task) {
 class _ResultView extends StatelessWidget {
   final GenerationTask task;
   final GenerationStore store;
-  const _ResultView({required this.task, required this.store});
+  final void Function(GenRef ref)? onRefTap;
+  const _ResultView({required this.task, required this.store, this.onRefTap});
 
   @override
   Widget build(BuildContext context) {
@@ -200,6 +278,7 @@ class _ResultView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          RefBlock(refs: task.references, onTap: onRefTap),
           if (task.kind == GenKind.image)
             ..._imageViews(context)
           else

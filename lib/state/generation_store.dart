@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../logging/app_log.dart';
+import '../models/gen_ref.dart';
 import '../models/generation_task.dart';
 import '../models/model_catalog.dart';
 import '../services/media_cache.dart';
@@ -116,6 +117,7 @@ class GenerationStore extends ChangeNotifier {
     String? id,
     String? label,
     String? parentTaskId,
+    List<GenRef>? references,
   }) async {
     final task = GenerationTask(
       id: id ?? newTaskId(),
@@ -127,6 +129,7 @@ class GenerationStore extends ChangeNotifier {
       status: GenTaskStatus.submitting,
       label: label,
       parentTaskId: parentTaskId,
+      references: references,
     );
     _tasks[task.id] = task;
     await _storage.upsertGenerationTask(task);
@@ -144,6 +147,7 @@ class GenerationStore extends ChangeNotifier {
     required String localPath,
     String? label,
     String? parentTaskId,
+    List<GenRef>? references,
   }) async {
     final task = GenerationTask(
       id: newTaskId(),
@@ -157,6 +161,7 @@ class GenerationStore extends ChangeNotifier {
       localPaths: [localPath],
       label: label,
       parentTaskId: parentTaskId,
+      references: references,
     );
     _tasks[task.id] = task;
     await _storage.upsertGenerationTask(task);

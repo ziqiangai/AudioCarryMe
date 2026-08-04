@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'gen_ref.dart';
 import 'media_paths.dart';
 import 'model_catalog.dart';
 
@@ -41,8 +42,11 @@ class GenerationTask {
   /// 场景标签（批量生成时如「场景 1」），用于聊天里串联同一条创作链。
   final String? label;
 
-  /// 血缘：图生视频时指向来源图片任务 id。
+  /// 血缘：图生视频时指向来源图片任务 id（保留兼容；新逻辑用 references）。
   final String? parentTaskId;
+
+  /// 引用列表（提示词卡片 / 参考图 / 首尾帧），底层用 id 关联。
+  final List<GenRef> references;
 
   /// 生成结果 URL 列表（图片或视频）。会过期，仅作下载源与兜底。
   List<String> resultUrls;
@@ -66,17 +70,20 @@ class GenerationTask {
     this.traceId,
     this.label,
     this.parentTaskId,
+    List<GenRef>? references,
     List<String>? resultUrls,
     List<String>? localPaths,
     this.error,
     DateTime? createdAt,
     DateTime? updatedAt,
-  })  : resultUrls = resultUrls ?? [],
+  })  : references = references ?? [],
+        resultUrls = resultUrls ?? [],
         localPaths = localPaths ?? [],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
   String get paramsJson => jsonEncode(params);
+  String get referencesJson => GenRef.encode(references);
   String get resultUrlsJson => jsonEncode(resultUrls);
   String get localPathsJson => jsonEncode(localPaths);
 
@@ -102,5 +109,6 @@ class GenerationTask {
         params: Map.of(params),
         label: label,
         parentTaskId: parentTaskId,
+        references: List.of(references),
       );
 }
