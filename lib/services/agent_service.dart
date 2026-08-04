@@ -11,6 +11,12 @@ class AgentTextDelta extends AgentEvent {
   const AgentTextDelta(this.text);
 }
 
+/// 工具调用开始流式传参（用于在 UI 提示"正在准备生成…"，避免长时间空白）。
+class AgentToolStart extends AgentEvent {
+  final String name;
+  const AgentToolStart(this.name);
+}
+
 /// 工具调用（生图/生视频）。App 层弹参数面板处理。
 class AgentToolCall extends AgentEvent {
   final String id;

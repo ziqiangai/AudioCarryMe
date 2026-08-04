@@ -12,6 +12,9 @@ class Conversation {
   /// agent 是否正在流式输出中（用于在末条气泡显示光标）。（不入库）
   bool streaming = false;
 
+  /// 正在流式传输的待生成工具调用数（>0 时底部显示「正在准备生成…」）。（不入库）
+  int pendingGenCount = 0;
+
   /// 创建时间，用于空会话的排序兜底，需持久化。
   final DateTime createdAt;
 

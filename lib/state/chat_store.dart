@@ -23,6 +23,14 @@ class ChatStore extends ChangeNotifier {
   void Function(Conversation conversation, List<AgentToolCall> calls)?
       toolCallHandler;
 
+  /// 清除「正在准备生成」提示（进入参数面板/处理时调用）。
+  void clearPendingGen(Conversation conversation) {
+    if (conversation.pendingGenCount != 0) {
+      conversation.pendingGenCount = 0;
+      notifyListeners();
+    }
+  }
+
   /// 追加一条本地消息（生成任务气泡、提示词卡片、系统提示），落库并刷新。
   Future<Message> appendLocalMessage(
     Conversation conversation, {
@@ -213,6 +221,9 @@ class ChatStore extends ChangeNotifier {
         switch (ev) {
           case AgentTextDelta(:final text):
             received.addAll(text.runes);
+          case AgentToolStart():
+            conversation.pendingGenCount++;
+            notifyListeners();
           case AgentToolCall():
             toolCalls.add(ev);
         }
@@ -262,8 +273,12 @@ class ChatStore extends ChangeNotifier {
     notifyListeners();
 
     // 文本吐完后再整批派发工具调用（同类批量只弹一次参数面板）。
-    if (toolCalls.isNotEmpty) {
-      toolCallHandler?.call(conversation, List.of(toolCalls));
+    if (toolCalls.isNotEmpty && toolCallHandler != null) {
+      toolCallHandler!.call(conversation, List.of(toolCalls));
+    } else if (conversation.pendingGenCount != 0) {
+      // 无处理者（如已切走会话）：撤下「准备中」提示。
+      conversation.pendingGenCount = 0;
+      notifyListeners();
     }
   }
 }

@@ -122,30 +122,87 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// 点击引用条 → 定位到被引用的原消息（卡片或来源图任务）并高亮。
+  /// 点击引用条 → 弹出被引用内容（提示词全文 / 参考图大图），并可「在聊天中定位」。
   void _onRefTap(GenRef ref) {
-    String? targetMsgId;
-    if (ref.targetIsTask) {
-      for (final m in widget.conversation.messages) {
-        if (m.taskId == ref.targetId) {
-          targetMsgId = m.id;
-          break;
-        }
+    Message? target;
+    for (final m in widget.conversation.messages) {
+      if (ref.targetIsTask ? m.taskId == ref.targetId : m.id == ref.targetId) {
+        target = m;
+        break;
       }
+    }
+
+    Widget content;
+    if (ref.kind == GenRefKind.promptCard) {
+      content = SelectableText(
+        target?.text ?? ref.snapshotText ?? '（内容已不可用）',
+        style: const TextStyle(fontSize: 14, height: 1.6),
+      );
     } else {
-      targetMsgId = ref.targetId; // 卡片消息 id
+      final task =
+          target?.taskId != null ? widget.genStore.byId(target!.taskId!) : null;
+      final img = task?.localAt(0) ??
+          (task != null && task.resultUrls.isNotEmpty
+              ? task.resultUrls.first
+              : ref.snapshotImage);
+      content = img == null
+          ? const Text('图片已不可用')
+          : ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: img.startsWith('/')
+                  ? Image.file(File(img))
+                  : Image.network(img),
+            );
     }
-    if (targetMsgId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('来源消息已不在当前会话'),
-        duration: Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
-      ));
-      return;
-    }
-    setState(() => _highlightedMsgId = targetMsgId);
+
+    final located = target;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetCtx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.5,
+        maxChildSize: 0.9,
+        builder: (_, scrollCtl) => Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 10, 6),
+            child: Row(children: [
+              Text('引用的${ref.kind.label}',
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              if (located != null)
+                TextButton.icon(
+                  icon: const Icon(Icons.my_location, size: 16),
+                  label: const Text('定位'),
+                  onPressed: () {
+                    Navigator.pop(sheetCtx);
+                    _locateMessage(located.id);
+                  },
+                ),
+            ]),
+          ),
+          const Divider(height: 1, color: Color(0xFFF0F0F0)),
+          Expanded(
+            child: ListView(
+              controller: scrollCtl,
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 30),
+              children: [content],
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /// 尽力滚动到并高亮某条消息（对已构建的项有效）。
+  void _locateMessage(String id) {
+    setState(() => _highlightedMsgId = id);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = _msgKeys[targetMsgId]?.currentContext;
+      final ctx = _msgKeys[id]?.currentContext;
       if (ctx != null) {
         Scrollable.ensureVisible(ctx,
             duration: const Duration(milliseconds: 300),
@@ -154,7 +211,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
     Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && _highlightedMsgId == targetMsgId) {
+      if (mounted && _highlightedMsgId == id) {
         setState(() => _highlightedMsgId = null);
       }
     });
@@ -231,6 +288,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _onToolCall(
       Conversation conv, List<AgentToolCall> calls) async {
     if (!mounted || conv != widget.conversation) return;
+    widget.store.clearPendingGen(conv); // 进入处理，撤下「准备中」提示
 
     // 1) 提示词卡片逐个产出（带场景 label，供后续生成解析引用 id）。
     for (final call in calls.where((c) => c.name == 'design_prompt')) {
@@ -685,7 +743,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               listenable: widget.store,
               builder: (context, _) {
                 final msgs = conv.messages;
-                final count = msgs.length + (conv.agentTyping ? 1 : 0);
+                // 底部占位：输入中 或 正在准备生成（工具参数流式传输中）。
+                final busy = conv.agentTyping || conv.pendingGenCount > 0;
+                final count = msgs.length + (busy ? 1 : 0);
                 // reverse 列表：index 0 = 最新（在底部）。
                 return ListView.builder(
                   controller: _scroll,
@@ -693,12 +753,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   itemCount: count,
                   itemBuilder: (context, i) {
-                    // 「输入中…」占位挂在最底部。
-                    if (conv.agentTyping && i == 0) {
-                      return const _TypingBubble();
+                    if (busy && i == 0) {
+                      return conv.agentTyping
+                          ? const _TypingBubble()
+                          : _PrepareBubble(count: conv.pendingGenCount);
                     }
-                    final mi =
-                        msgs.length - 1 - (conv.agentTyping ? i - 1 : i);
+                    final mi = msgs.length - 1 - (busy ? i - 1 : i);
                     final msg = msgs[mi];
                     // 多选模式：左侧复选圈，点击任意处切换勾选。
                     if (_selectMode) {
@@ -1295,6 +1355,44 @@ class _ErrorMessageBubble extends StatelessWidget {
           ]),
         ),
       );
+}
+
+/// 「正在准备生成…」占位（工具参数流式传输期间，避免看起来卡住）。
+class _PrepareBubble extends StatelessWidget {
+  final int count;
+  const _PrepareBubble({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SquareAvatar(label: 'A', color: WeColors.avatar),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: WeColors.bubbleOther,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const SizedBox(
+                width: 13,
+                height: 13,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Color(0xFF2E7CF6)),
+              ),
+              const SizedBox(width: 8),
+              Text('正在准备生成 $count 项…',
+                  style: const TextStyle(fontSize: 14, color: Color(0xFF666666))),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _TypingBubble extends StatelessWidget {

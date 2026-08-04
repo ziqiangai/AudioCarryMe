@@ -171,9 +171,12 @@ class DeepseekAgentService implements AgentService {
             final block = evt['content_block'] as Map<String, dynamic>?;
             if (block != null && block['type'] == 'tool_use') {
               final idx = (evt['index'] as num?)?.toInt() ?? 0;
-              toolNames[idx] = (block['name'] as String?) ?? '';
+              final name = (block['name'] as String?) ?? '';
+              toolNames[idx] = name;
               toolIds[idx] = (block['id'] as String?) ?? '';
               toolJson[idx] = StringBuffer();
+              // 立即通知：接下来在流式传输本次工具的参数（可能较久）。
+              yield AgentToolStart(name);
             }
           case 'content_block_delta':
             final idx = (evt['index'] as num?)?.toInt() ?? 0;
